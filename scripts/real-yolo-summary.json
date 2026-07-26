@@ -1,0 +1,57 @@
+[
+  {
+    "file": "1.webp",
+    "panels": 5,
+    "text": 7,
+    "bubble": 6,
+    "topConf": 0.99,
+    "readingOrder": [
+      0,
+      263,
+      84,
+      0,
+      262
+    ]
+  },
+  {
+    "file": "2.webp",
+    "panels": 3,
+    "text": 9,
+    "bubble": 8,
+    "topConf": 0.99,
+    "readingOrder": [
+      130,
+      392,
+      361
+    ]
+  },
+  {
+    "file": "3.webp",
+    "panels": 4,
+    "text": 12,
+    "bubble": 9,
+    "topConf": 0.99,
+    "readingOrder": [
+      0,
+      0,
+      360,
+      0
+    ]
+  },
+  {
+    "file": "4.webp",
+    "panels": 7,
+    "text": 7,
+    "bubble": 7,
+    "topConf": 0.99,
+    "readingOrder": [
+      171,
+      405,
+      115,
+      0,
+      407,
+      121,
+      518
+    ]
+  }
+]

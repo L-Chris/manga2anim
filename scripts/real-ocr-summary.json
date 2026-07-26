@@ -1,0 +1,28 @@
+[
+  {
+    "file": "1.webp",
+    "lines": [
+      {
+        "text": "mmmM",
+        "conf": 0.517
+      }
+    ]
+  },
+  {
+    "file": "2.webp",
+    "lines": []
+  },
+  {
+    "file": "3.webp",
+    "lines": []
+  },
+  {
+    "file": "4.webp",
+    "lines": [
+      {
+        "text": "000000",
+        "conf": 0.454
+      }
+    ]
+  }
+]
