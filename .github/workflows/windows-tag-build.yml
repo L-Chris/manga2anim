@@ -6,7 +6,7 @@ on:
       - "*"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: windows-installer-${{ github.ref }}
@@ -53,3 +53,36 @@ jobs:
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*-setup.exe
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $repository = $env:RELEASE_REPOSITORY
+          $assets = @(
+            (Get-ChildItem "src-tauri/target/release/bundle/msi" -Filter "*.msi").FullName
+            (Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*-setup.exe").FullName
+          )
+
+          if ($assets.Count -eq 0) {
+            throw "No Windows installers were found for release $tag."
+          }
+
+          $null = gh release view $tag --repo $repository 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $assets --repo $repository --clobber
+          } else {
+            gh release create $tag $assets `
+              --repo $repository `
+              --title $tag `
+              --generate-notes `
+              --verify-tag
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release publishing failed for $tag."
+          }
