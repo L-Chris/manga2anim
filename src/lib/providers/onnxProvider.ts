@@ -365,7 +365,11 @@ class PpOcrEngine implements OcrEngine {
     }
   }
 
-  async recognize(img: DecodedImage, onProgress?: ProgressFn): Promise<OcrLine[]> {
+  async recognize(
+    img: DecodedImage,
+    regions: readonly BBox[],
+    onProgress?: ProgressFn
+  ): Promise<OcrLine[]> {
     await this.ensure();
     const dict = this.dictionary!;
     const detSession = this.detSession!;
@@ -403,7 +407,8 @@ class PpOcrEngine implements OcrEngine {
       img.height,
       runDet,
       runRec,
-      dict
+      dict,
+      { regions }
     );
 
     onProgress?.(1, "OCR complete");

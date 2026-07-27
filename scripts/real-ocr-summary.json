@@ -1,28 +1,54 @@
 [
   {
     "file": "1.webp",
+    "yoloRegions": 9,
     "lines": [
       {
-        "text": "mmmM",
-        "conf": 0.517
+        "text": "优诺",
+        "conf": 0.984
       }
-    ]
-  },
-  {
-    "file": "2.webp",
-    "lines": []
-  },
-  {
-    "file": "3.webp",
-    "lines": []
-  },
-  {
-    "file": "4.webp",
-    "lines": [
-      {
-        "text": "000000",
-        "conf": 0.454
-      }
-    ]
+    ],
+    "metrics": {
+      "characterAccuracy": 0.09090909090909094,
+      "errors": 20,
+      "expectedCharacters": 22,
+      "matches": [
+        {
+          "expected": "已经够了",
+          "actual": "",
+          "distance": 4
+        },
+        {
+          "expected": "我不想看见",
+          "actual": "",
+          "distance": 5
+        },
+        {
+          "expected": "优诺",
+          "actual": "优诺",
+          "distance": 0
+        },
+        {
+          "expected": "再受更多伤了",
+          "actual": "",
+          "distance": 6
+        },
+        {
+          "expected": "切",
+          "actual": "",
+          "distance": 1
+        },
+        {
+          "expected": "已经",
+          "actual": "",
+          "distance": 2
+        },
+        {
+          "expected": "够了",
+          "actual": "",
+          "distance": 2
+        }
+      ]
+    }
   }
 ]

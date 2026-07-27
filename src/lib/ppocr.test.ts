@@ -3,8 +3,11 @@ import {
   ctcDecode,
   detPostprocess,
   detPreprocess,
+  filterOcrBoxesByRegions,
+  OCR_MIN_CONFIDENCE,
   parseDictionary,
   recPreprocess,
+  runOcrPipeline,
 } from "./ppocr";
 
 describe("parseDictionary", () => {
@@ -128,6 +131,62 @@ describe("detPostprocess", () => {
     expect(b.y).toBeLessThanOrEqual(20);
     expect(b.x + b.w).toBeGreaterThanOrEqual(42);
     expect(b.y + b.h).toBeGreaterThanOrEqual(42);
+  });
+});
+
+describe("filterOcrBoxesByRegions", () => {
+  it("keeps text boxes mostly contained by YOLO text/bubble regions", () => {
+    const boxes = [
+      { x: 20, y: 20, w: 20, h: 20 },
+      { x: 85, y: 85, w: 20, h: 20 },
+      { x: 200, y: 200, w: 40, h: 40 },
+    ];
+    const regions = [{ x: 0, y: 0, w: 100, h: 100 }];
+
+    expect(filterOcrBoxesByRegions(boxes, regions)).toEqual([boxes[0], boxes[1]]);
+  });
+
+  it("rejects every detector hit when YOLO found no text regions", () => {
+    expect(
+      filterOcrBoxesByRegions([{ x: 0, y: 0, w: 10, h: 10 }], [])
+    ).toEqual([]);
+  });
+});
+
+describe("runOcrPipeline quality filtering", () => {
+  it("drops empty and below-threshold recognizer output", async () => {
+    const image = new Uint8ClampedArray(32 * 32 * 4).fill(255);
+    const runDet = async () => {
+      const probability = new Float32Array(32 * 32);
+      for (let y = 8; y < 24; y++) {
+        for (let x = 8; x < 24; x++) probability[y * 32 + x] = 0.9;
+      }
+      return probability;
+    };
+    let output = new Float32Array([0, OCR_MIN_CONFIDENCE - 0.01]);
+    const runRec = async () => ({ logits: output, T: 1, numClasses: 2 });
+    const options = { regions: [{ x: 0, y: 0, w: 32, h: 32 }] };
+
+    expect(
+      await runOcrPipeline(image, 32, 32, runDet, runRec, ["字"], options)
+    ).toEqual([]);
+
+    output = new Float32Array([0, OCR_MIN_CONFIDENCE + 0.01]);
+    const accepted = await runOcrPipeline(
+      image,
+      32,
+      32,
+      runDet,
+      runRec,
+      ["字"],
+      options
+    );
+    expect(accepted.map((line) => line.text)).toEqual(["字"]);
+
+    output = new Float32Array([1, 0]);
+    expect(
+      await runOcrPipeline(image, 32, 32, runDet, runRec, ["字"], options)
+    ).toEqual([]);
   });
 });
 

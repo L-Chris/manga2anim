@@ -1,4 +1,4 @@
-import type { OcrLine, RawDetection } from "../../types";
+import type { BBox, OcrLine, RawDetection } from "../../types";
 
 /**
  * Decoded image handed to providers. Pixel data is RGBA (Uint8ClampedArray),
@@ -25,8 +25,12 @@ export interface Segmenter {
 /** An OCR engine (PP-OCRv6 small). Recognizes text lines in an image. */
 export interface OcrEngine {
   readonly name: string;
-  /** Recognize all text lines in the image. */
-  recognize(image: DecodedImage, onProgress?: ProgressFn): Promise<OcrLine[]>;
+  /** Recognize text lines inside YOLO text/bubble regions. */
+  recognize(
+    image: DecodedImage,
+    regions: readonly BBox[],
+    onProgress?: ProgressFn
+  ): Promise<OcrLine[]>;
 }
 
 /** A provider bundles the required segmentation and OCR engines. */

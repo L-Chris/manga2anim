@@ -71,7 +71,14 @@ function createTestProvider(): InferenceProvider {
     },
     ocr: {
       name: "Test OCR",
-      async recognize() {
+      async recognize(_image, regions) {
+        expect(regions).toEqual(
+          detections
+            .filter((detection) =>
+              detection.className === "bubble" || detection.className === "text"
+            )
+            .map((detection) => detection.bbox)
+        );
         return lines;
       },
     },

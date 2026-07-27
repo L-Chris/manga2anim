@@ -54,10 +54,13 @@ export async function parsePage(
   onProgress?.(0.5, "Reconstructing reading order");
   const orderedPanels = sortByReadingOrder(panels, opts.readingDirection);
 
-  // 3. OCR over the whole page (one pass) -----------------------------------
+  // 3. OCR constrained to YOLO text/bubble regions --------------------------
   onProgress?.(0.55, "Running OCR");
-  const ocrLines = await provider.ocr.recognize(image, (f, stage) =>
-    onProgress?.(0.55 + f * 0.25, stage)
+  const ocrRegions = [...bubbles, ...texts].map((detection) => detection.bbox);
+  const ocrLines = await provider.ocr.recognize(
+    image,
+    ocrRegions,
+    (f, stage) => onProgress?.(0.55 + f * 0.25, stage)
   );
 
   // 4. Assemble text regions from bubbles + text detections + OCR lines -----

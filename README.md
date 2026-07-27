@@ -186,13 +186,15 @@ The full det+rec pipeline is implemented in pure TypeScript (no OpenCV) in
 - **Det (DBNet):** `detPreprocess` resizes the image so the longest side ≤ 960
   with both dims rounded to multiples of 32, ImageNet-normalized
   (`mean=[0.485,0.456,0.406]`, `std=[0.229,0.224,0.225]`). `detPostprocess`
-  binarizes the probability map (threshold 0.3), runs two-pass connected
-  components, filters by min-area, and unclip-expands each box back into
-  original-image coordinates.
+  binarizes the probability map, runs two-pass connected components, filters by
+  min-area, and unclip-expands each box back into original-image coordinates.
+  Detector boxes are then constrained to YOLO text/bubble regions so artwork
+  and panel-border hits do not reach recognition.
 - **Rec (CTC):** `recPreprocess` crops each detected box, resizes to a fixed
-  height of 48 preserving aspect ratio (padded to width 320), same
-  normalization. `ctcDecode` does greedy argmax → collapse repeats → drop the
-  blank token (index 0) → map `class i → dictionary[i-1]`.
+  height of 48 preserving aspect ratio (padded to width 320), and BGR-normalizes
+  pixels to `[-1,1]`. `ctcDecode` does greedy argmax → collapse repeats → drop
+  the blank token (index 0) → map `class i → dictionary[i-1]`. Empty results
+  and lines below the calibrated 0.8 mean confidence threshold are discarded.
 
 `resolveProvider()` requires the complete YOLO26s + PP-OCRv6 model set (shown in
 the toolbar's "模型" badge after loading). The YOLO post-processing (letterbox

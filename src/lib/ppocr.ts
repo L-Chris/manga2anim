@@ -27,6 +27,15 @@ const DET_EXPAND_RATIO = 1.4;
 const REC_HEIGHT = 48;
 /** Maximum recognition width (padded). */
 const REC_MAX_WIDTH = 320;
+/** Empirically rejects the short numeric/Latin garbage produced on manga art. */
+export const OCR_MIN_CONFIDENCE = 0.8;
+
+export interface OcrPipelineOptions {
+  /** YOLO text/bubble regions used to reject detector hits on artwork/borders. */
+  regions?: readonly BBox[];
+  /** Minimum mean CTC confidence required for a line to reach the UI. */
+  minConfidence?: number;
+}
 
 // ---- dictionary ------------------------------------------------------------
 
@@ -190,6 +199,37 @@ export function detPostprocess(
   }
 
   return boxes;
+}
+
+/** Keep OCR detector boxes that lie mostly inside a YOLO text/bubble region. */
+export function filterOcrBoxesByRegions(
+  boxes: readonly BBox[],
+  regions: readonly BBox[],
+  minContainment = 0.5
+): BBox[] {
+  if (regions.length === 0) return [];
+  return boxes.filter((box) => {
+    const area = Math.max(0, box.w) * Math.max(0, box.h);
+    if (area === 0) return false;
+    return regions.some((region) => {
+      const centerX = box.x + box.w / 2;
+      const centerY = box.y + box.h / 2;
+      if (
+        centerX >= region.x &&
+        centerX <= region.x + region.w &&
+        centerY >= region.y &&
+        centerY <= region.y + region.h
+      ) {
+        return true;
+      }
+      const x1 = Math.max(box.x, region.x);
+      const y1 = Math.max(box.y, region.y);
+      const x2 = Math.min(box.x + box.w, region.x + region.w);
+      const y2 = Math.min(box.y + box.h, region.y + region.h);
+      const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+      return intersection / area >= minContainment;
+    });
+  });
 }
 
 // ---- rec preprocessing -----------------------------------------------------
@@ -374,7 +414,8 @@ export function ctcDecode(
  *
  * @param runDet  callback that takes [1,3,H,W] tensor and returns [1,1,H,W] prob map
  * @param runRec  callback that takes [1,3,48,W] tensor and returns [1,T,C] logits
- * @param dictionary  parsed ppocr_keys_v1.txt
+ * @param dictionary  parsed ppocrv6_dict.txt
+ * @param options  YOLO region constraints and recognizer confidence threshold
  */
 export async function runOcrPipeline(
   imgData: Uint8ClampedArray,
@@ -382,12 +423,25 @@ export async function runOcrPipeline(
   imgH: number,
   runDet: (tensor: Float32Array, h: number, w: number) => Promise<Float32Array>,
   runRec: (tensor: Float32Array, width: number) => Promise<{ logits: Float32Array; T: number; numClasses: number }>,
-  dictionary: string[]
+  dictionary: string[],
+  options: OcrPipelineOptions = {}
 ): Promise<OcrLine[]> {
   // 1. Detection.
   const { tensor: detTensor, newW, newH, scaleW, scaleH } = detPreprocess(imgData, imgW, imgH);
   const probMap = await runDet(detTensor, newH, newW);
-  const boxes = detPostprocess(probMap, newH, newW, scaleW, scaleH, imgW, imgH);
+  const detectedBoxes = detPostprocess(
+    probMap,
+    newH,
+    newW,
+    scaleW,
+    scaleH,
+    imgW,
+    imgH
+  );
+  const boxes = options.regions === undefined
+    ? detectedBoxes
+    : filterOcrBoxesByRegions(detectedBoxes, options.regions);
+  const minConfidence = options.minConfidence ?? OCR_MIN_CONFIDENCE;
 
   // 2. Recognition per box.
   const lines: OcrLine[] = [];
@@ -396,7 +450,7 @@ export async function runOcrPipeline(
     if (!crop) continue;
     const { logits, T, numClasses } = await runRec(crop.tensor, crop.width);
     const { text, confidence } = ctcDecode(logits, T, numClasses, dictionary);
-    if (text.trim().length === 0) continue;
+    if (text.trim().length === 0 || confidence < minConfidence) continue;
     lines.push({ text, confidence, bbox });
   }
 
