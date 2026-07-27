@@ -122,4 +122,39 @@ describe("pipeline integration", () => {
     expect(rtl.panels[0].bbox.x).toBe(210);
     expect(ltr.panels[0].bbox.x).toBe(10);
   });
+
+  it("keeps columns in one bubble and joins them in reading order", async () => {
+    const base = createTestProvider();
+    const provider: InferenceProvider = {
+      ...base,
+      ocr: {
+        name: base.ocr.name,
+        async recognize() {
+          // Deliberately return left before right to prove assembly does not
+          // depend on detector traversal order.
+          return [
+            {
+              text: "second column",
+              confidence: 0.97,
+              bbox: { x: 240, y: 40, w: 20, h: 40 },
+            },
+            {
+              text: "first column",
+              confidence: 0.98,
+              bbox: { x: 300, y: 40, w: 20, h: 40 },
+            },
+          ];
+        },
+      },
+    };
+
+    const result = await parsePage(image, provider, {
+      pageId: "bubble-columns",
+      name: "page.png",
+      readingDirection: "rtl",
+    });
+    const bubble = result.textRegions.find((region) => region.fromBubble);
+
+    expect(bubble?.text).toBe("first column second column");
+  });
 });

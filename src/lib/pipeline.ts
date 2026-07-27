@@ -70,7 +70,8 @@ export async function parsePage(
     texts,
     ocrLines,
     width,
-    height
+    height,
+    opts.readingDirection
   );
 
   // 5. Build panel objects and assign text regions by containment -----------
@@ -124,13 +125,17 @@ function assembleTextRegions(
   texts: RawDetection[],
   ocrLines: OcrLine[],
   pageWidth: number,
-  pageHeight: number
+  pageHeight: number,
+  readingDirection: ReadingDirection
 ): TextRegion[] {
   const regions: TextRegion[] = [];
 
   const makeRegion = (det: RawDetection, fromBubble: boolean): TextRegion => {
-    const contained = ocrLines.filter((l) =>
-      pointInBBox(l.bbox.x + l.bbox.w / 2, l.bbox.y + l.bbox.h / 2, det.bbox)
+    const contained = sortByReadingOrder(
+      ocrLines.filter((l) =>
+        pointInBBox(l.bbox.x + l.bbox.w / 2, l.bbox.y + l.bbox.h / 2, det.bbox)
+      ),
+      readingDirection
     );
     const text = contained.map((l) => l.text).join(" ");
     const confidence = contained.length > 0

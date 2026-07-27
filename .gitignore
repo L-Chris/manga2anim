@@ -12,7 +12,7 @@ models/*.onnx
 models/*.pt
 models/_README.md
 # Legacy / wrong-tier dictionaries — only ppocrv6_dict.txt (18708 chars, matches
-# the small rec head's 18710 classes) is committed so OCR works out of the box.
+# the v6 rec head's 18710 classes) is committed so OCR works out of the box.
 models/ppocr_keys_v1.txt
 models/ppocrv6_tiny_dict.txt
 *.onnx

@@ -22,7 +22,7 @@ export interface Segmenter {
   segment(image: DecodedImage, onProgress?: ProgressFn): Promise<RawDetection[]>;
 }
 
-/** An OCR engine (PP-OCRv6 small). Recognizes text lines in an image. */
+/** An OCR engine (PP-OCRv6 medium by default). Recognizes text lines in an image. */
 export interface OcrEngine {
   readonly name: string;
   /** Recognize text lines inside YOLO text/bubble regions. */

@@ -30,8 +30,8 @@ const REC_MAX_WIDTH = 320;
 /** Empirically rejects the short numeric/Latin garbage produced on manga art. */
 export const OCR_MIN_CONFIDENCE = 0.8;
 
-/** Only columns this tall relative to their width use vertical segmentation. */
-const VERTICAL_MIN_ASPECT_RATIO = 1.8;
+/** Two-or-more-character columns are normally at least this tall vs. wide. */
+const VERTICAL_MIN_ASPECT_RATIO = 1.35;
 /** Prevents an internal gap in a glyph (for example 三) becoming a character cut. */
 const VERTICAL_MIN_CHARACTER_PITCH = 0.9;
 
@@ -256,9 +256,12 @@ export function recPreprocess(
   const ch = Math.min(imgH - cy, Math.ceil(bbox.h));
   if (cw < 2 || ch < 2) return null;
 
-  // Target width preserving aspect ratio, capped at REC_MAX_WIDTH.
-  const ratio = REC_HEIGHT / ch;
-  const targetW = Math.min(REC_MAX_WIDTH, Math.max(1, Math.round(cw * ratio)));
+  // Match PaddleOCR's RecResizeImg: preserve aspect ratio, round the width up,
+  // and use bilinear (OpenCV INTER_LINEAR-compatible half-pixel) sampling.
+  const targetW = Math.min(
+    REC_MAX_WIDTH,
+    Math.max(1, Math.ceil((cw * REC_HEIGHT) / ch))
+  );
 
   const plane = REC_HEIGHT * REC_MAX_WIDTH;
   // RecResizeImg normalizes BGR pixels to [-1, 1] and then inserts them into a
@@ -266,15 +269,35 @@ export function recPreprocess(
   // at normalized value 0 (mid-gray), matching PaddleOCR exactly.
   const tensor = new Float32Array(3 * plane);
 
+  const scaleX = cw / targetW;
+  const scaleY = ch / REC_HEIGHT;
   for (let y = 0; y < REC_HEIGHT; y++) {
-    const sy = Math.min(ch - 1, Math.floor(y / ratio));
+    const sourceY = (y + 0.5) * scaleY - 0.5;
+    const sourceY0 = Math.floor(sourceY);
+    const y0 = Math.max(0, Math.min(ch - 1, sourceY0));
+    const y1 = Math.max(0, Math.min(ch - 1, sourceY0 + 1));
+    const weightY = Math.max(0, Math.min(1, sourceY - sourceY0));
     for (let x = 0; x < targetW; x++) {
-      const sx = Math.min(cw - 1, Math.floor(x / ratio));
-      const sp = ((cy + sy) * imgW + (cx + sx)) * 4;
+      const sourceX = (x + 0.5) * scaleX - 0.5;
+      const sourceX0 = Math.floor(sourceX);
+      const x0 = Math.max(0, Math.min(cw - 1, sourceX0));
+      const x1 = Math.max(0, Math.min(cw - 1, sourceX0 + 1));
+      const weightX = Math.max(0, Math.min(1, sourceX - sourceX0));
+      const p00 = ((cy + y0) * imgW + cx + x0) * 4;
+      const p01 = ((cy + y0) * imgW + cx + x1) * 4;
+      const p10 = ((cy + y1) * imgW + cx + x0) * 4;
+      const p11 = ((cy + y1) * imgW + cx + x1) * 4;
       const di = y * REC_MAX_WIDTH + x;
-      tensor[di] = data[sp + 2] / 127.5 - 1;
-      tensor[plane + di] = data[sp + 1] / 127.5 - 1;
-      tensor[2 * plane + di] = data[sp] / 127.5 - 1;
+      for (let channel = 0; channel < 3; channel++) {
+        const top = data[p00 + channel] * (1 - weightX) +
+          data[p01 + channel] * weightX;
+        const bottom = data[p10 + channel] * (1 - weightX) +
+          data[p11 + channel] * weightX;
+        const value = top * (1 - weightY) + bottom * weightY;
+        // RGBA input is RGB; Paddle's recognizer expects BGR planes.
+        const planeIndex = 2 - channel;
+        tensor[planeIndex * plane + di] = value / 127.5 - 1;
+      }
     }
   }
   return { tensor, width: targetW };
@@ -284,10 +307,9 @@ export function recPreprocess(
  * Split a narrow, upright text column into one-character (occasionally
  * two-character) crops using horizontal bands of background pixels.
  *
- * The recognizer expects a horizontal line. Feeding it a whole vertical
- * column shrinks every glyph to a few pixels, while rotating the column turns
- * each Han character sideways. Keeping each returned crop upright preserves
- * the glyph shape and gives it most of the recognizer's 48-pixel input height.
+ * This is a compatibility fallback for recognizers that cannot decode a whole
+ * rotated column. PP-OCRv6 medium uses the whole-column path first, which
+ * preserves context and punctuation instead of recognizing character cells.
  *
  * Returns null for horizontal/square boxes or when no reliable character gap
  * exists, allowing the caller to keep the normal one-crop recognition path.
@@ -448,7 +470,7 @@ export function rotateRgba90cw(
       const X = h - 1 - y;
       const Y = x;
       const si = (y * w + x) * 4;
-      const di = (X * nw + Y) * 4;
+      const di = (Y * nw + X) * 4;
       out[di] = data[si];
       out[di + 1] = data[si + 1];
       out[di + 2] = data[si + 2];
@@ -456,6 +478,19 @@ export function rotateRgba90cw(
     }
   }
   return { data: out, w: nw, h: nh };
+}
+
+/** Rotate a vertical column so top-to-bottom text becomes left-to-right. */
+export function rotateRgba90ccw(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number
+): { data: Uint8ClampedArray; w: number; h: number } {
+  let rotated = { data, w, h };
+  for (let index = 0; index < 3; index++) {
+    rotated = rotateRgba90cw(rotated.data, rotated.w, rotated.h);
+  }
+  return rotated;
 }
 
 function rotateRgba(
@@ -493,6 +528,24 @@ export function cropRgba(
     }
   }
   return { data: out, w: cw, h: ch };
+}
+
+/**
+ * Prepare a complete vertical text column for the horizontal CTC recognizer.
+ * Keeping the column intact lets PP-OCRv6 medium use neighboring characters as
+ * context; a 90-degree counter-clockwise rotation preserves top-to-bottom
+ * manga reading order as left-to-right recognizer input.
+ */
+export function recPreprocessVerticalColumn(
+  data: Uint8ClampedArray,
+  imgW: number,
+  imgH: number,
+  bbox: BBox
+): { tensor: Float32Array; width: number } | null {
+  const crop = cropRgba(data, imgW, imgH, bbox);
+  if (!crop) return null;
+  const rotated = rotateRgba90ccw(crop.data, crop.w, crop.h);
+  return recPreprocessBuffer(rotated.data, rotated.w, rotated.h);
 }
 
 // ---- rec postprocessing (CTC greedy decode) --------------------------------
@@ -585,11 +638,32 @@ export async function runOcrPipeline(
     : filterOcrBoxesByRegions(detectedBoxes, options.regions);
   const minConfidence = options.minConfidence ?? OCR_MIN_CONFIDENCE;
 
-  // 2. Recognition per box.
+  // 2. Recognition per detector box. A box is one text line/column; bubble
+  // grouping happens later in assembleTextRegions and is intentionally kept
+  // separate from recognizer preprocessing.
   const lines: OcrLine[] = [];
   for (const bbox of boxes) {
+    const isVertical = bbox.h / Math.max(1, bbox.w) >= VERTICAL_MIN_ASPECT_RATIO;
+
+    // PP-OCRv6 medium recognizes a complete rotated column much more reliably
+    // than isolated glyphs. Try this context-preserving path first.
+    if (isVertical) {
+      const column = recPreprocessVerticalColumn(imgData, imgW, imgH, bbox);
+      if (column) {
+        const { logits, T, numClasses } = await runRec(column.tensor, column.width);
+        const decoded = ctcDecode(logits, T, numClasses, dictionary);
+        const decodedText = decoded.text.trim();
+        if (decodedText.length > 0 && decoded.confidence >= minConfidence) {
+          lines.push({ text: decodedText, confidence: decoded.confidence, bbox });
+          continue;
+        }
+      }
+    }
+
+    // Low-confidence vertical columns fall back to character cells so older
+    // or custom lightweight recognition models remain usable.
     const verticalSegments = splitVerticalTextBox(imgData, imgW, imgH, bbox);
-    const recognitionBoxes = verticalSegments ?? [bbox];
+    const recognitionBoxes = isVertical ? verticalSegments ?? [bbox] : [bbox];
     let text = "";
     let confidenceSum = 0;
     let confidenceCharacters = 0;

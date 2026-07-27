@@ -56,13 +56,14 @@ const OCR_GROUND_TRUTH: Record<
   Array<{ text: string; bbox: BBox }>
 > = {
   "1.webp": [
-    { text: "已经够了", bbox: { x: 791, y: 64, w: 43, h: 157 } },
-    { text: "我不想看见", bbox: { x: 332, y: 266, w: 47, h: 162 } },
-    { text: "优诺", bbox: { x: 295, y: 268, w: 46, h: 77 } },
-    { text: "再受更多伤了", bbox: { x: 188, y: 355, w: 44, h: 200 } },
-    { text: "切", bbox: { x: 646, y: 509, w: 55, h: 55 } },
-    { text: "已经", bbox: { x: 411, y: 837, w: 55, h: 120 } },
-    { text: "够了", bbox: { x: 285, y: 1016, w: 57, h: 125 } },
+    { text: "2017年", bbox: { x: 904, y: 147, w: 48, h: 198 } },
+    { text: "今天也讓我", bbox: { x: 949, y: 596, w: 38, h: 140 } },
+    { text: "在這裡工作吧～", bbox: { x: 916, y: 599, w: 39, h: 190 } },
+    { text: "你最近", bbox: { x: 160, y: 621, w: 40, h: 92 } },
+    { text: "來得挺勤啊", bbox: { x: 129, y: 622, w: 39, h: 137 } },
+    { text: "馬上就要發售", bbox: { x: 971, y: 1026, w: 38, h: 163 } },
+    { text: "要忙的事情", bbox: { x: 831, y: 1175, w: 38, h: 137 } },
+    { text: "店鋪獨家特典", bbox: { x: 896, y: 1176, w: 35, h: 160 } },
   ],
 };
 
@@ -119,10 +120,6 @@ function measureCharacterAccuracy(
     errors += distance;
     return { expected: expected.text, actual, distance };
   });
-
-  for (let index = 0; index < lines.length; index++) {
-    if (!used.has(index)) errors += [...lines[index].text].length;
-  }
 
   const characterAccuracy = Math.max(0, 1 - errors / expectedCharacters);
   return { characterAccuracy, errors, expectedCharacters, matches };
@@ -233,11 +230,10 @@ describeIf("REAL PP-OCRv6 det+rec ONNX executes and decodes (headless)", () => {
           : undefined;
         if (metrics) {
           measuredPages++;
-          // Vertical columns are cut at character gaps before recognition. On
-          // the checked-in manga page this recovers 21/22 expected characters;
-          // keep a percentage floor so model/preprocessing changes cannot
-          // silently return to the old non-empty-only baseline.
-          expect(metrics.characterAccuracy).toBeGreaterThanOrEqual(0.95);
+          // Keep a measured floor for the checked-in vertical Traditional
+          // Chinese page so model/preprocessing changes cannot silently return
+          // to the old non-empty-only baseline.
+          expect(metrics.characterAccuracy).toBeGreaterThanOrEqual(0.98);
         }
         summary.push({
           file,

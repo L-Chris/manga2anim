@@ -3,7 +3,7 @@
 A local desktop app (**Tauri + TypeScript + React + Tailwind CSS**) that parses
 manga pages into structured panels and dialogue. It runs a local
 **YOLO26s Manga instance-segmentation** model for panels / text / speech
-bubbles, **PP-OCRv6 small** for text recognition, and a deterministic
+bubbles, a **PP-OCRv6 small detector + PP-OCRv6 medium recognizer**, and a deterministic
 **geometric reading-order algorithm** to reconstruct the reading flow for
 RTL / LTR / vertical manga.
 
@@ -151,12 +151,12 @@ Expected filenames:
 |------|-------|--------|
 | `yolo26s-manga-seg.onnx` | YOLO26s manga instance segmentation | `frame/text/balloon` + mask prototypes |
 | `ppocrv6-det.onnx` | PP-OCRv6 small text detector (DBNet) | probability map `[1,1,H,W]` |
-| `ppocrv6-rec.onnx` | PP-OCRv6 small text recognizer | CTC logits `[1,T,numClasses]` |
+| `ppocrv6-rec.onnx` | PP-OCRv6 medium text recognizer | CTC logits `[1,T,numClasses]` |
 | `ppocrv6_dict.txt` | OCR character dictionary | 18708 chars (50 languages), committed in `models/` |
 
 The v6 dictionary ships in `models/` (committed, so OCR works out of the box;
 the old `ppocr_keys_v1.txt` is **wrong** for v6 — its 6623 classes don't match
-the small rec head's 18710 classes and would silently drop most characters).
+the v6 rec head's 18710 classes and would silently drop most characters).
 Re-fetch it with:
 
 ```bash
@@ -167,11 +167,12 @@ The det/rec ONNX files are **not** in the HF segmentation repo — fetch them fr
 the official PaddlePaddle ONNX exports, e.g.:
 
 ```bash
-# small tier (matches the goal's "PP-OCRv6 small"); swap _small_ for _tiny_/_medium_ as needed
+# Small detector + medium recognizer. The larger recognizer materially improves
+# Traditional Chinese/Japanese manga columns while remaining ONNX-compatible.
 curl -L -o models/ppocrv6-det.onnx \
   https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx/resolve/main/inference.onnx
 curl -L -o models/ppocrv6-rec.onnx \
-  https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/main/inference.onnx
+  https://huggingface.co/PaddlePaddle/PP-OCRv6_medium_rec_onnx/resolve/main/inference.onnx
 ```
 
 > Filenames above follow the PaddlePaddle ONNX export layout; if a release uses
@@ -193,11 +194,14 @@ The full det+rec pipeline is implemented in pure TypeScript (no OpenCV) in
 - **Rec (CTC):** `recPreprocess` crops each detected box, resizes to a fixed
   height of 48 preserving aspect ratio (padded to width 320), and BGR-normalizes
   pixels to `[-1,1]`. `ctcDecode` does greedy argmax → collapse repeats → drop
-  the blank token (index 0) → map `class i → dictionary[i-1]`. Narrow vertical
-  columns are split at horizontal character gaps into upright 1–2 character
-  crops, recognized without rotation, then concatenated top-to-bottom. Empty
-  results and lines below the calibrated 0.8 mean confidence threshold are
-  discarded.
+  the blank token (index 0) → map `class i → dictionary[i-1]`. A narrow vertical
+  detector box is treated as one text column: it is rotated so top-to-bottom
+  manga text becomes left-to-right recognizer input, then decoded in one pass
+  by PP-OCRv6 medium. Character-cell splitting is only a low-confidence
+  compatibility fallback. Columns whose centers fall inside the same speech
+  bubble are sorted by the selected reading direction and merged back into one
+  bubble result. Empty results and lines below the calibrated 0.8 mean
+  confidence threshold are discarded.
 
 `resolveProvider()` requires the complete YOLO26s + PP-OCRv6 model set (shown in
 the toolbar's "模型" badge after loading). The YOLO post-processing (letterbox

@@ -106,7 +106,7 @@ describe("createOnnxProvider", () => {
       cache: "no-store",
     });
     expect(provider.id).toBe("onnx");
-    expect(provider.ocr.name).toBe("PP-OCRv6 small");
+    expect(provider.ocr.name).toBe("PP-OCRv6 medium");
     vi.unstubAllGlobals();
   });
 

@@ -2,56 +2,58 @@
   {
     "file": "1.webp",
     "panels": 5,
-    "text": 7,
-    "bubble": 6,
+    "text": 9,
+    "bubble": 7,
     "topConf": 0.99,
     "readingOrder": [
-      0,
-      263,
-      84,
-      0,
-      262
+      103,
+      97,
+      566,
+      1004,
+      1002
     ]
   },
   {
     "file": "2.webp",
-    "panels": 3,
-    "text": 9,
-    "bubble": 8,
+    "panels": 4,
+    "text": 12,
+    "bubble": 11,
     "topConf": 0.99,
     "readingOrder": [
-      130,
-      392,
-      361
+      699,
+      705,
+      928,
+      1180
     ]
   },
   {
     "file": "3.webp",
     "panels": 4,
-    "text": 12,
-    "bubble": 9,
+    "text": 13,
+    "bubble": 12,
     "topConf": 0.99,
     "readingOrder": [
-      0,
-      0,
-      360,
-      0
+      4,
+      523,
+      529,
+      1148
     ]
   },
   {
     "file": "4.webp",
-    "panels": 7,
-    "text": 7,
+    "panels": 8,
+    "text": 8,
     "bubble": 7,
     "topConf": 0.99,
     "readingOrder": [
-      171,
-      405,
-      115,
       0,
-      407,
-      121,
-      518
+      695,
+      689,
+      694,
+      1192,
+      1193,
+      1193,
+      1303
     ]
   }
 ]

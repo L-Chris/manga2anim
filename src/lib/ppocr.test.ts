@@ -7,6 +7,9 @@ import {
   OCR_MIN_CONFIDENCE,
   parseDictionary,
   recPreprocess,
+  recPreprocessVerticalColumn,
+  rotateRgba90ccw,
+  rotateRgba90cw,
   runOcrPipeline,
   splitVerticalTextBox,
 } from "./ppocr";
@@ -221,6 +224,50 @@ describe("recPreprocess", () => {
     expect(result!.tensor[0]).toBeCloseTo(-1, 4); // B
     expect(result!.tensor[2 * plane]).toBeCloseTo(1, 4); // R
     expect(result!.tensor[319]).toBe(0); // right padding
+  });
+
+  it("rotates a complete vertical column into one left-to-right input", () => {
+    const width = 20;
+    const height = 60;
+    const data = new Uint8ClampedArray(width * height * 4).fill(255);
+    const result = recPreprocessVerticalColumn(data, width, height, {
+      x: 0,
+      y: 0,
+      w: width,
+      h: height,
+    });
+
+    expect(result).not.toBeNull();
+    // Rotated dimensions are 60x20, then resized to height 48.
+    expect(result!.width).toBe(144);
+    expect(result!.tensor).toHaveLength(3 * 48 * 320);
+  });
+});
+
+describe("RGBA rotation", () => {
+  function labeledImage() {
+    const data = new Uint8ClampedArray(2 * 3 * 4);
+    for (let index = 0; index < 6; index++) {
+      data[index * 4] = index + 1;
+      data[index * 4 + 3] = 255;
+    }
+    return data;
+  }
+
+  function redValues(data: Uint8ClampedArray) {
+    return Array.from({ length: data.length / 4 }, (_, index) => data[index * 4]);
+  }
+
+  it("maps every pixel during a clockwise rotation", () => {
+    const rotated = rotateRgba90cw(labeledImage(), 2, 3);
+    expect({ w: rotated.w, h: rotated.h }).toEqual({ w: 3, h: 2 });
+    expect(redValues(rotated.data)).toEqual([5, 3, 1, 6, 4, 2]);
+  });
+
+  it("maps top-to-bottom source pixels from left to right when counter-clockwise", () => {
+    const rotated = rotateRgba90ccw(labeledImage(), 2, 3);
+    expect({ w: rotated.w, h: rotated.h }).toEqual({ w: 3, h: 2 });
+    expect(redValues(rotated.data)).toEqual([2, 4, 6, 1, 3, 5]);
   });
 });
 

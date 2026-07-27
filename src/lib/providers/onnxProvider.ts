@@ -18,7 +18,7 @@ import type {
  *
  *   yolo26s-manga-seg.onnx   YOLO26s manga instance segmentation
  *   ppocrv6-det.onnx         PP-OCRv6 small text detector
- *   ppocrv6-rec.onnx         PP-OCRv6 small text recognizer
+ *   ppocrv6-rec.onnx         PP-OCRv6 medium text recognizer
  *
  * Class mapping is **model-driven**, not hardcoded. The reference model
  * (ShadowB/Manga109-panel-balloon-text-yolov26-segmentation) stores its labels
@@ -338,7 +338,7 @@ export function decodeMask(
 // ---- PP-OCRv6 --------------------------------------------------------------
 
 class PpOcrEngine implements OcrEngine {
-  readonly name = "PP-OCRv6 small";
+  readonly name = "PP-OCRv6 medium";
   private detSession: ort.InferenceSession | null = null;
   private recSession: ort.InferenceSession | null = null;
   private dictionary: string[] | null = null;
