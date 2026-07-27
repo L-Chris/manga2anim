@@ -32,8 +32,8 @@ export type DetectionClass = "panel" | "text" | "bubble";
 
 /**
  * A single raw instance-segmentation detection straight from the model, before
- * any geometric reasoning. Providers (ONNX / demo) normalize their output into
- * this shape.
+ * any geometric reasoning. The ONNX provider normalizes its output into this
+ * shape.
  */
 export interface RawDetection {
   classId: number;

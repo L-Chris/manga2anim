@@ -29,16 +29,10 @@ export interface OcrEngine {
   recognize(image: DecodedImage, onProgress?: ProgressFn): Promise<OcrLine[]>;
 }
 
-/**
- * A provider bundles a segmenter + OCR engine and reports whether its model
- * weights are actually available. The pipeline picks the ONNX provider when
- * weights are present and otherwise falls back to the demo provider so the full
- * flow remains runnable end-to-end.
- */
+/** A provider bundles the required segmentation and OCR engines. */
 export interface InferenceProvider {
   readonly id: string;
   readonly label: string;
-  readonly available: boolean;
   readonly segmenter: Segmenter;
   readonly ocr: OcrEngine;
 }

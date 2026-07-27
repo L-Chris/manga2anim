@@ -29,8 +29,8 @@ import type {
  * correctly. The default name order below matches that reference model exactly
  * and is used when the ONNX file carries no readable `names` metadata.
  *
- * The provider is `available` only when the segmentation weights exist; OCR
- * degrades gracefully (no text lines) if its weights are missing.
+ * Provider creation requires a complete generated model manifest. Missing
+ * assets are reported as an error instead of selecting a fallback algorithm.
  *
  * Post-processing follows the standard Ultralytics YOLO-seg layout:
  *   output0: [1, 4 + numClasses + 32, numDetections]
@@ -344,35 +344,27 @@ class PpOcrEngine implements OcrEngine {
   constructor(
     private detUrl: string,
     private recUrl: string,
-    private dictUrl: string,
-    public available: boolean
+    private dictUrl: string
   ) {}
 
-  private async ensure(): Promise<boolean> {
-    if (!this.available) return false;
+  private async ensure(): Promise<void> {
     if (!this.detSession || !this.recSession || !this.dictionary) {
-      try {
-        this.detSession = await ort.InferenceSession.create(this.detUrl, {
-          executionProviders: ["wasm"],
-        });
-        this.recSession = await ort.InferenceSession.create(this.recUrl, {
-          executionProviders: ["wasm"],
-        });
-        // Load dictionary (one character per line).
-        const dictRes = await fetch(this.dictUrl);
-        if (!dictRes.ok) throw new Error(`Dictionary fetch failed: ${dictRes.status}`);
-        const dictText = await dictRes.text();
-        this.dictionary = parseDictionary(dictText);
-      } catch {
-        this.available = false;
-        return false;
-      }
+      this.detSession = await ort.InferenceSession.create(this.detUrl, {
+        executionProviders: ["wasm"],
+      });
+      this.recSession = await ort.InferenceSession.create(this.recUrl, {
+        executionProviders: ["wasm"],
+      });
+      // Load dictionary (one character per line).
+      const dictRes = await fetch(this.dictUrl);
+      if (!dictRes.ok) throw new Error(`Dictionary fetch failed: ${dictRes.status}`);
+      const dictText = await dictRes.text();
+      this.dictionary = parseDictionary(dictText);
     }
-    return true;
   }
 
   async recognize(img: DecodedImage, onProgress?: ProgressFn): Promise<OcrLine[]> {
-    if (!(await this.ensure())) return [];
+    await this.ensure();
     const dict = this.dictionary!;
     const detSession = this.detSession!;
     const recSession = this.recSession!;
@@ -421,7 +413,7 @@ class PpOcrEngine implements OcrEngine {
 
 export async function createOnnxProvider(
   opts: OnnxProviderOptions
-): Promise<InferenceProvider | null> {
+): Promise<InferenceProvider> {
   const segUrl = `${opts.modelsDirUrl}/${opts.segModel ?? "yolo26s-manga-seg.onnx"}`;
   const detUrl = `${opts.modelsDirUrl}/${opts.detModel ?? "ppocrv6-det.onnx"}`;
   const recUrl = `${opts.modelsDirUrl}/${opts.recModel ?? "ppocrv6-rec.onnx"}`;
@@ -433,17 +425,19 @@ export async function createOnnxProvider(
     const res = await fetch(`${opts.modelsDirUrl}/manifest.json`, {
       cache: "no-store",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      throw new Error(`model manifest request failed with HTTP ${res.status}`);
+    }
     const manifest = (await res.json()) as { files?: unknown };
     const files = manifest.files;
     if (
       !Array.isArray(files) ||
       !REQUIRED_MODEL_FILES.every((file) => files.includes(file))
     ) {
-      return null;
+      throw new Error("model manifest does not contain every required asset");
     }
-  } catch {
-    return null;
+  } catch (error) {
+    throw new Error(`Required model assets are unavailable: ${String(error)}`);
   }
 
   const classNames = buildClassNames(
@@ -454,8 +448,7 @@ export async function createOnnxProvider(
   return {
     id: "onnx",
     label: "YOLO26s + PP-OCRv6 (ONNX)",
-    available: true,
     segmenter: new YoloSegmenter(segUrl, classNames, inputSize),
-    ocr: new PpOcrEngine(detUrl, recUrl, dictUrl, true),
+    ocr: new PpOcrEngine(detUrl, recUrl, dictUrl),
   };
 }

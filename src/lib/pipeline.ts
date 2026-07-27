@@ -9,7 +9,6 @@ import type {
 import { classifyText } from "./classify";
 import { panelColor } from "./colors";
 import { containment, unionBBox } from "./geometry";
-import { placeholderText } from "./providers/demoProvider";
 import type { DecodedImage, InferenceProvider, ProgressFn } from "./providers/types";
 import { sortByReadingOrder } from "./readingOrder";
 
@@ -113,10 +112,9 @@ export async function parsePage(
 /**
  * Merge bubble detections, text detections, and OCR lines into TextRegions.
  *
- * Strategy: each bubble/text detection becomes a region. If OCR produced lines,
- * the region's text is the concatenation of OCR lines whose centers fall inside
- * it. If OCR is empty (demo provider), a placeholder is used so the UI and
- * export still have content to show.
+ * Strategy: each bubble/text detection becomes a region. The region's text is
+ * the concatenation of OCR lines whose centers fall inside it; regions without
+ * recognized text remain empty for manual correction.
  */
 function assembleTextRegions(
   bubbles: RawDetection[],
@@ -126,26 +124,15 @@ function assembleTextRegions(
   pageHeight: number
 ): TextRegion[] {
   const regions: TextRegion[] = [];
-  let placeholderIdx = 0;
 
   const makeRegion = (det: RawDetection, fromBubble: boolean): TextRegion => {
     const contained = ocrLines.filter((l) =>
       pointInBBox(l.bbox.x + l.bbox.w / 2, l.bbox.y + l.bbox.h / 2, det.bbox)
     );
-    let text: string;
-    let confidence: number;
-    if (contained.length > 0) {
-      text = contained.map((l) => l.text).join(" ");
-      confidence =
-        contained.reduce((s, l) => s + l.confidence, 0) / contained.length;
-    } else if (ocrLines.length === 0) {
-      // Demo mode: synthesize placeholder text.
-      text = placeholderText(placeholderIdx++);
-      confidence = det.confidence;
-    } else {
-      text = "";
-      confidence = det.confidence;
-    }
+    const text = contained.map((l) => l.text).join(" ");
+    const confidence = contained.length > 0
+      ? contained.reduce((s, l) => s + l.confidence, 0) / contained.length
+      : det.confidence;
 
     const kind = classifyText({
       text,

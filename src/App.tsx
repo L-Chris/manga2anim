@@ -28,10 +28,14 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const provider = await resolveProvider(modelsDirUrl());
-      if (cancelled) return;
-      providerRef.current = provider;
-      setProviderLabel(provider.label);
+      try {
+        const provider = await resolveProvider(modelsDirUrl());
+        if (cancelled) return;
+        providerRef.current = provider;
+        setProviderLabel(provider.label);
+      } catch {
+        if (!cancelled) setProviderLabel("模型不可用");
+      }
     })();
     return () => {
       cancelled = true;
@@ -40,7 +44,17 @@ export default function App() {
 
   const runPipeline = useCallback(
     async (images: ImportedImage[]) => {
-      const provider = providerRef.current ?? (await resolveProvider(modelsDirUrl()));
+      let provider: InferenceProvider;
+      try {
+        provider = providerRef.current ?? (await resolveProvider(modelsDirUrl()));
+      } catch (error) {
+        const message = String(error);
+        setProviderLabel("模型不可用");
+        for (const image of images) {
+          setPageStatus(image.pageId, "error", message);
+        }
+        return;
+      }
       providerRef.current = provider;
       setProviderLabel(provider.label);
 

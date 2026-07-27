@@ -82,7 +82,7 @@ describe("normalizeClassName / buildClassNames", () => {
     expect(normalizeClassName("  TEXT  ")).toBe("text");
   });
 
-  it("falls back to text for unknown labels", () => {
+  it("maps unknown labels to text", () => {
     expect(normalizeClassName("mystery")).toBe("text");
   });
 
@@ -105,12 +105,12 @@ describe("createOnnxProvider", () => {
     expect(fetchMock).toHaveBeenCalledWith("/models/manifest.json", {
       cache: "no-store",
     });
-    expect(provider?.id).toBe("onnx");
-    expect(provider?.ocr.name).toBe("PP-OCRv6 small");
+    expect(provider.id).toBe("onnx");
+    expect(provider.ocr.name).toBe("PP-OCRv6 small");
     vi.unstubAllGlobals();
   });
 
-  it("falls back when any required model asset is missing", async () => {
+  it("rejects provider creation when any required model asset is missing", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -119,7 +119,9 @@ describe("createOnnxProvider", () => {
       })
     );
 
-    expect(await createOnnxProvider({ modelsDirUrl: "/models" })).toBeNull();
+    await expect(createOnnxProvider({ modelsDirUrl: "/models" })).rejects.toThrow(
+      "Required model assets are unavailable"
+    );
     vi.unstubAllGlobals();
   });
 });

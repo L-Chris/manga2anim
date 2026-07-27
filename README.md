@@ -41,9 +41,8 @@ src/
     image.ts                   image decode (data URL → RGBA)
     providers/
       types.ts                 Segmenter / OcrEngine / InferenceProvider interfaces
-      demoProvider.ts          no-weights fallback (gutter-based segmentation)
       onnxProvider.ts          YOLO26s + PP-OCRv6 via onnxruntime-web
-      index.ts                 resolveProvider() — picks ONNX if weights exist
+      index.ts                 resolveProvider() — loads the required ONNX models
   components/
     Toolbar.tsx                import / direction / export controls
     ImageViewer.tsx            image + SVG panel overlay (borders, badges, click)
@@ -85,11 +84,12 @@ npm run tauri build    # package a distributable desktop binary
 > the Win32 PATH inherited by child `cmd.exe` processes. Add it to the system
 > PATH and retry.
 
-## Using real model weights
+## Model assets
 
 Release installers bundle the production model assets, so installed builds run
-YOLO26s + PP-OCRv6 fully locally out of the box. A **demo provider** remains as
-a fallback for source builds where the weights have not been downloaded.
+YOLO26s + PP-OCRv6 fully locally out of the box. Source builds require all model
+assets listed below; when any asset is missing or cannot be loaded, processing
+stops with an explicit error.
 
 ### Reference segmentation model
 
@@ -194,14 +194,12 @@ The full det+rec pipeline is implemented in pure TypeScript (no OpenCV) in
   normalization. `ctcDecode` does greedy argmax → collapse repeats → drop the
   blank token (index 0) → map `class i → dictionary[i-1]`.
 
-When `yolo26s-manga-seg.onnx` is reachable, `resolveProvider()` automatically
-switches from the demo provider to the ONNX provider (shown in the toolbar's
-"模型" badge). The YOLO post-processing (letterbox preprocessing, per-class NMS,
-prototype-mask decode) is likewise pure and unit-tested (`postprocessYolo`,
-`decodeMask`, `letterbox`), verified against the real model parameters (3
-classes, `imgsz=1280`, 32 mask coefficients) with synthetic tensors — so both
-the segmentation and OCR decode paths are correct the moment the exported
-`.onnx` files are dropped in.
+`resolveProvider()` requires the complete YOLO26s + PP-OCRv6 model set (shown in
+the toolbar's "模型" badge after loading). The YOLO post-processing (letterbox
+preprocessing, per-class NMS, prototype-mask decode) is likewise pure and
+unit-tested (`postprocessYolo`, `decodeMask`, `letterbox`), verified against the
+real model parameters (3 classes, `imgsz=1280`, 32 mask coefficients) with
+synthetic tensors.
 
 ## Export format
 
