@@ -47,6 +47,14 @@ export const DEFAULT_SEG_CLASS_NAMES = ["frame", "text", "balloon"];
 /** Default segmentation input size — matches the reference model's training. */
 export const DEFAULT_SEG_INPUT_SIZE = 1280;
 
+/** Files that must be present before the production provider is selected. */
+export const REQUIRED_MODEL_FILES = [
+  "yolo26s-manga-seg.onnx",
+  "ppocrv6-det.onnx",
+  "ppocrv6-rec.onnx",
+  "ppocrv6_dict.txt",
+] as const;
+
 /**
  * Map a raw model label (any casing/spelling) onto our internal 3-class schema.
  * `frame`/`panel` → panel; `balloon`/`ballon`/`bubble` → bubble; `text` → text.
@@ -76,7 +84,7 @@ export interface OnnxProviderOptions {
   segClassNames?: string[];
   /** Override the segmentation input size (must match how the model was exported). */
   segInputSize?: number;
-  /** Dictionary filename (default: ppocr_keys_v1.txt). */
+  /** Dictionary filename (default: ppocrv6_dict.txt). */
   dictModel?: string;
 }
 
@@ -417,18 +425,26 @@ export async function createOnnxProvider(
   const segUrl = `${opts.modelsDirUrl}/${opts.segModel ?? "yolo26s-manga-seg.onnx"}`;
   const detUrl = `${opts.modelsDirUrl}/${opts.detModel ?? "ppocrv6-det.onnx"}`;
   const recUrl = `${opts.modelsDirUrl}/${opts.recModel ?? "ppocrv6-rec.onnx"}`;
-  const dictUrl = `${opts.modelsDirUrl}/${opts.dictModel ?? "ppocr_keys_v1.txt"}`;
+  const dictUrl = `${opts.modelsDirUrl}/${opts.dictModel ?? "ppocrv6_dict.txt"}`;
 
-  // Probe for the segmentation weights; if absent, the ONNX provider is not
-  // available and the caller falls back to the demo provider.
-  let available = false;
+  // Probe a tiny generated manifest instead of downloading the segmentation
+  // model twice (once for availability and once for the ONNX session).
   try {
-    const res = await fetch(segUrl, { method: "HEAD" });
-    available = res.ok;
+    const res = await fetch(`${opts.modelsDirUrl}/manifest.json`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const manifest = (await res.json()) as { files?: unknown };
+    const files = manifest.files;
+    if (
+      !Array.isArray(files) ||
+      !REQUIRED_MODEL_FILES.every((file) => files.includes(file))
+    ) {
+      return null;
+    }
   } catch {
-    available = false;
+    return null;
   }
-  if (!available) return null;
 
   const classNames = buildClassNames(
     opts.segClassNames ?? DEFAULT_SEG_CLASS_NAMES

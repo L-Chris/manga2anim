@@ -50,6 +50,16 @@ describe("detPreprocess", () => {
     const { tensor } = detPreprocess(data, w, h, 960);
     expect(tensor[0]).toBeCloseTo((1 - 0.485) / 0.229, 2);
   });
+
+  it("converts RGBA input to the detector's BGR channel order", () => {
+    const data = new Uint8ClampedArray(32 * 32 * 4);
+    data[0] = 255; // red
+    data[3] = 255;
+    const { tensor, newW, newH } = detPreprocess(data, 32, 32);
+    const plane = newW * newH;
+    expect(tensor[0]).toBeCloseTo((0 - 0.485) / 0.229, 4);
+    expect(tensor[2 * plane]).toBeCloseTo((1 - 0.406) / 0.225, 4);
+  });
 });
 
 describe("detPostprocess", () => {
@@ -137,6 +147,20 @@ describe("recPreprocess", () => {
     expect(result!.tensor.length).toBe(3 * 48 * 320);
     expect(result!.width).toBeGreaterThan(0);
     expect(result!.width).toBeLessThanOrEqual(320);
+  });
+
+  it("uses BGR [-1,1] normalization and zero-valued right padding", () => {
+    const data = new Uint8ClampedArray(4 * 4 * 4);
+    for (let i = 0; i < 16; i++) {
+      data[i * 4] = 255; // red
+      data[i * 4 + 3] = 255;
+    }
+    const result = recPreprocess(data, 4, 4, { x: 0, y: 0, w: 4, h: 4 });
+    expect(result).not.toBeNull();
+    const plane = 48 * 320;
+    expect(result!.tensor[0]).toBeCloseTo(-1, 4); // B
+    expect(result!.tensor[2 * plane]).toBeCloseTo(1, 4); // R
+    expect(result!.tensor[319]).toBe(0); // right padding
   });
 });
 

@@ -1,6 +1,6 @@
 [package]
 name = "manga-panel-parser"
-version = "0.1.0"
+version = "0.1.1"
 description = "Manga panel auto-parsing and visualization tool"
 authors = ["you"]
 edition = "2021"

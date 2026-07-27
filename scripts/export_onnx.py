@@ -54,5 +54,6 @@ if ONNX_PATH.exists():
     print(f"✓ Exported: {ONNX_PATH} ({size_mb:.1f} MB)")
     print("  The web app will now auto-detect this model on next launch.")
 else:
-    print(f"WARNING: expected output at {ONNX_PATH} not found.")
+    print(f"ERROR: expected output at {ONNX_PATH} not found.")
     print(f"  Check {default_onnx} or the Ultralytics export log above.")
+    sys.exit(1)

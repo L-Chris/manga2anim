@@ -124,12 +124,7 @@ export default function App() {
   );
 }
 
-/**
- * Base URL serving ONNX model weights. In a packaged Tauri app this would point
- * at the app config dir via the asset protocol; in dev we leave it undefined so
- * the demo provider is used unless weights are served from /models.
- */
-function modelsDirUrl(): string | undefined {
-  // Serve weights from the dev server's /models directory if present.
-  return import.meta.env.DEV ? "/models" : undefined;
+/** Base URL for model assets served by Vite and embedded in packaged builds. */
+function modelsDirUrl(): string {
+  return "/models";
 }

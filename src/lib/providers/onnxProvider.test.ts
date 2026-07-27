@@ -13,6 +13,8 @@ import {
   letterbox,
   normalizeClassName,
   postprocessYolo,
+  REQUIRED_MODEL_FILES,
+  createOnnxProvider,
 } from "./onnxProvider";
 import type { DecodedImage } from "./types";
 
@@ -87,6 +89,38 @@ describe("normalizeClassName / buildClassNames", () => {
   it("exposes the reference defaults and training input size", () => {
     expect(DEFAULT_SEG_CLASS_NAMES).toEqual(["frame", "text", "balloon"]);
     expect(DEFAULT_SEG_INPUT_SIZE).toBe(1280);
+  });
+});
+
+describe("createOnnxProvider", () => {
+  it("selects the real provider only when the complete model manifest exists", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ files: [...REQUIRED_MODEL_FILES] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = await createOnnxProvider({ modelsDirUrl: "/models" });
+
+    expect(fetchMock).toHaveBeenCalledWith("/models/manifest.json", {
+      cache: "no-store",
+    });
+    expect(provider?.id).toBe("onnx");
+    expect(provider?.ocr.name).toBe("PP-OCRv6 small");
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back when any required model asset is missing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ files: ["yolo26s-manga-seg.onnx"] }),
+      })
+    );
+
+    expect(await createOnnxProvider({ modelsDirUrl: "/models" })).toBeNull();
+    vi.unstubAllGlobals();
   });
 });
 

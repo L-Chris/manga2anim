@@ -87,9 +87,9 @@ npm run tauri build    # package a distributable desktop binary
 
 ## Using real model weights
 
-The app runs end-to-end out of the box with a **demo provider** (lightweight
-gutter-based segmentation + placeholder text) so you can exercise the whole
-pipeline without any weights. The real path uses the reference model below.
+Release installers bundle the production model assets, so installed builds run
+YOLO26s + PP-OCRv6 fully locally out of the box. A **demo provider** remains as
+a fallback for source builds where the weights have not been downloaded.
 
 ### Reference segmentation model
 
@@ -138,8 +138,12 @@ curl -L -o models/best.pt \
 
 ### Where the app looks for weights
 
-- **Dev:** `models/` at the project root (served by Vite at `/models`).
-- **Packaged:** the app config dir; see `models_dir` in `src-tauri/src/lib.rs`.
+- **Dev:** `models/` at the project root, streamed by Vite at `/models`.
+- **Packaged:** embedded `/models` assets inside the Tauri frontend bundle.
+
+The tag-release workflow downloads pinned upstream revisions, verifies the
+published SHA-256 values, exports the YOLO checkpoint to ONNX, and requires all
+model files before packaging. The large weights remain git-ignored.
 
 Expected filenames:
 

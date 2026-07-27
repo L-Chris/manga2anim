@@ -16,12 +16,12 @@ import type { BBox, OcrLine } from "../types";
 const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];
 
-/** DBNet binarization threshold. */
-const DET_THRESH = 0.3;
-/** Minimum fraction of the image area a text box must cover. */
-const DET_MIN_AREA_RATIO = 0.0004;
+/** PP-OCRv6 small detector thresholds from its published inference config. */
+const DET_THRESH = 0.2;
+const DET_BOX_THRESH = 0.45;
+const DET_MIN_SIDE = 3;
 /** Polygon expansion ratio (simplified pyclipper unclip). */
-const DET_EXPAND_RATIO = 1.6;
+const DET_EXPAND_RATIO = 1.4;
 
 /** Recognition fixed height. */
 const REC_HEIGHT = 48;
@@ -77,9 +77,10 @@ export function detPreprocess(
       const sx = Math.min(width - 1, Math.floor(x / scaleW));
       const sp = (sy * width + sx) * 4;
       const di = y * newW + x;
-      tensor[di] = (data[sp] / 255 - MEAN[0]) / STD[0];
+      // Paddle's published detector decodes BGR input before normalization.
+      tensor[di] = (data[sp + 2] / 255 - MEAN[0]) / STD[0];
       tensor[plane + di] = (data[sp + 1] / 255 - MEAN[1]) / STD[1];
-      tensor[2 * plane + di] = (data[sp + 2] / 255 - MEAN[2]) / STD[2];
+      tensor[2 * plane + di] = (data[sp] / 255 - MEAN[2]) / STD[2];
     }
   }
   return { tensor, newW, newH, scaleW, scaleH };
@@ -147,9 +148,11 @@ export function detPostprocess(
   }
 
   // 3. Compute bounding boxes per component.
-  const minArea = origW * origH * DET_MIN_AREA_RATIO / (scaleW * scaleH);
   const boxes: BBox[] = [];
-  const compBounds = new Map<number, { x1: number; y1: number; x2: number; y2: number; area: number }>();
+  const compBounds = new Map<
+    number,
+    { x1: number; y1: number; x2: number; y2: number; area: number; probSum: number }
+  >();
 
   for (let y = 0; y < mapH; y++) {
     for (let x = 0; x < mapW; x++) {
@@ -157,20 +160,25 @@ export function detPostprocess(
       if (labels[idx] === 0) continue;
       const root = find(labels[idx]);
       let b = compBounds.get(root);
-      if (!b) { b = { x1: x, y1: y, x2: x, y2: y, area: 0 }; compBounds.set(root, b); }
+      if (!b) {
+        b = { x1: x, y1: y, x2: x, y2: y, area: 0, probSum: 0 };
+        compBounds.set(root, b);
+      }
       b.x1 = Math.min(b.x1, x);
       b.y1 = Math.min(b.y1, y);
       b.x2 = Math.max(b.x2, x);
       b.y2 = Math.max(b.y2, y);
       b.area++;
+      b.probSum += probMap[idx];
     }
   }
 
   // 4. Filter by area and expand (simplified unclip).
   for (const [, b] of compBounds) {
-    if (b.area < minArea) continue;
     const w = b.x2 - b.x1 + 1;
     const h = b.y2 - b.y1 + 1;
+    if (w < DET_MIN_SIDE || h < DET_MIN_SIDE) continue;
+    if (b.probSum / b.area < DET_BOX_THRESH) continue;
     const perimeter = 2 * (w + h);
     const expand = (DET_EXPAND_RATIO * b.area) / Math.max(1, perimeter);
     // Map back to original image coords.
@@ -208,13 +216,10 @@ export function recPreprocess(
   const targetW = Math.min(REC_MAX_WIDTH, Math.max(1, Math.round(cw * ratio)));
 
   const plane = REC_HEIGHT * REC_MAX_WIDTH;
-  // PaddleOCR pads the *raw* crop with black (0) and then normalizes, so the
-  // padding region in normalized space is (0 - mean)/std, NOT 0. Match that
-  // exactly or the model sees a bright right-margin and emits spurious chars.
+  // RecResizeImg normalizes BGR pixels to [-1, 1] and then inserts them into a
+  // zero-filled [3,48,320] tensor. The untouched right padding therefore stays
+  // at normalized value 0 (mid-gray), matching PaddleOCR exactly.
   const tensor = new Float32Array(3 * plane);
-  tensor.fill((0 - MEAN[0]) / STD[0], 0, plane);
-  tensor.fill((0 - MEAN[1]) / STD[1], plane, 2 * plane);
-  tensor.fill((0 - MEAN[2]) / STD[2], 2 * plane, 3 * plane);
 
   for (let y = 0; y < REC_HEIGHT; y++) {
     const sy = Math.min(ch - 1, Math.floor(y / ratio));
@@ -222,9 +227,9 @@ export function recPreprocess(
       const sx = Math.min(cw - 1, Math.floor(x / ratio));
       const sp = ((cy + sy) * imgW + (cx + sx)) * 4;
       const di = y * REC_MAX_WIDTH + x;
-      tensor[di] = (data[sp] / 255 - MEAN[0]) / STD[0];
-      tensor[plane + di] = (data[sp + 1] / 255 - MEAN[1]) / STD[1];
-      tensor[2 * plane + di] = (data[sp + 2] / 255 - MEAN[2]) / STD[2];
+      tensor[di] = data[sp + 2] / 127.5 - 1;
+      tensor[plane + di] = data[sp + 1] / 127.5 - 1;
+      tensor[2 * plane + di] = data[sp] / 127.5 - 1;
     }
   }
   return { tensor, width: targetW };

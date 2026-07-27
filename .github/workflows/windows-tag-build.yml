@@ -16,7 +16,7 @@ jobs:
   build-windows:
     name: Build Windows installers
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Check out repository
@@ -29,6 +29,75 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Cache exported YOLO26s model
+        id: yolo-cache
+        uses: actions/cache@v5
+        with:
+          path: models/yolo26s-manga-seg.onnx
+          key: yolo26s-manga-seg-0b4376e4-ultralytics-8.4.43-opset17-v1
+
+      - name: Prepare bundled model assets
+        shell: pwsh
+        env:
+          YOLO_CACHE_HIT: ${{ steps.yolo-cache.outputs.cache-hit }}
+        run: |
+          function Download-VerifiedFile {
+            param(
+              [string] $Uri,
+              [string] $Destination,
+              [string] $ExpectedSha256
+            )
+
+            Invoke-WebRequest -Uri $Uri -OutFile $Destination
+            $actual = (Get-FileHash $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $ExpectedSha256) {
+              throw "SHA-256 mismatch for $Destination. Expected $ExpectedSha256, got $actual."
+            }
+          }
+
+          New-Item -ItemType Directory -Path "models" -Force | Out-Null
+
+          if ($env:YOLO_CACHE_HIT -ne "true") {
+            Download-VerifiedFile `
+              "https://huggingface.co/ShadowB/Manga109-panel-balloon-text-yolov26-segmentation/resolve/3a860269ee0beb43ce9f31d82c7851441eb178ae/best.pt" `
+              "models/best.pt" `
+              "0b4376e426fa96af3976afa6a2602421dacf2dec96ef87b4a44f5e8d4971cb6f"
+            python -m pip install --disable-pip-version-check `
+              "ultralytics==8.4.43" `
+              "onnx==1.19.1" `
+              "onnxslim==0.1.94" `
+              "onnxruntime==1.28.0"
+            if ($LASTEXITCODE -ne 0) { throw "Python model-export dependencies failed to install." }
+            python scripts/export_onnx.py
+            if ($LASTEXITCODE -ne 0) { throw "YOLO26s ONNX export failed." }
+          }
+
+          Download-VerifiedFile `
+            "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx/resolve/28fe5895c24fd108c19eb3e8479f4ab385fbfc62/inference.onnx" `
+            "models/ppocrv6-det.onnx" `
+            "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e"
+          Download-VerifiedFile `
+            "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx/resolve/b8f84f0b80c529de40b4fbb3544b84fa7233a513/inference.onnx" `
+            "models/ppocrv6-rec.onnx" `
+            "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634"
+
+          $required = @(
+            "models/yolo26s-manga-seg.onnx"
+            "models/ppocrv6-det.onnx"
+            "models/ppocrv6-rec.onnx"
+            "models/ppocrv6_dict.txt"
+          )
+          foreach ($file in $required) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Required model asset is missing: $file"
+            }
+          }
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -40,7 +109,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Verify model assets
+        run: node scripts/verify-model-assets.mjs
+
+      - name: Run tests
+        run: npm test
+
       - name: Build Tauri installers
+        env:
+          MANGA_BUNDLE_MODELS: "1"
         run: npm run tauri -- build
 
       - name: Upload Windows installers
