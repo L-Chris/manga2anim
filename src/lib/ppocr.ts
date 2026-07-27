@@ -30,6 +30,11 @@ const REC_MAX_WIDTH = 320;
 /** Empirically rejects the short numeric/Latin garbage produced on manga art. */
 export const OCR_MIN_CONFIDENCE = 0.8;
 
+/** Only columns this tall relative to their width use vertical segmentation. */
+const VERTICAL_MIN_ASPECT_RATIO = 1.8;
+/** Prevents an internal gap in a glyph (for example 三) becoming a character cut. */
+const VERTICAL_MIN_CHARACTER_PITCH = 0.9;
+
 export interface OcrPipelineOptions {
   /** YOLO text/bubble regions used to reject detector hits on artwork/borders. */
   regions?: readonly BBox[];
@@ -276,6 +281,143 @@ export function recPreprocess(
 }
 
 /**
+ * Split a narrow, upright text column into one-character (occasionally
+ * two-character) crops using horizontal bands of background pixels.
+ *
+ * The recognizer expects a horizontal line. Feeding it a whole vertical
+ * column shrinks every glyph to a few pixels, while rotating the column turns
+ * each Han character sideways. Keeping each returned crop upright preserves
+ * the glyph shape and gives it most of the recognizer's 48-pixel input height.
+ *
+ * Returns null for horizontal/square boxes or when no reliable character gap
+ * exists, allowing the caller to keep the normal one-crop recognition path.
+ */
+export function splitVerticalTextBox(
+  data: Uint8ClampedArray,
+  imgW: number,
+  imgH: number,
+  bbox: BBox
+): BBox[] | null {
+  const x = Math.max(0, Math.floor(bbox.x));
+  const y = Math.max(0, Math.floor(bbox.y));
+  const w = Math.min(imgW - x, Math.ceil(bbox.w));
+  const h = Math.min(imgH - y, Math.ceil(bbox.h));
+  if (w < 3 || h < 3 || h / w < VERTICAL_MIN_ASPECT_RATIO) return null;
+
+  // Estimate the light background from the upper luminance quartile instead
+  // of assuming pure white. This still works on lightly screened speech
+  // bubbles while keeping gray antialiasing around black glyphs as foreground.
+  const histogram = new Uint32Array(256);
+  for (let yy = 0; yy < h; yy++) {
+    for (let xx = 0; xx < w; xx++) {
+      const p = ((y + yy) * imgW + x + xx) * 4;
+      const luminance = Math.round(
+        0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2]
+      );
+      histogram[luminance]++;
+    }
+  }
+  const target = Math.ceil(w * h * 0.8);
+  let seen = 0;
+  let background = 255;
+  for (let value = 0; value < histogram.length; value++) {
+    seen += histogram[value];
+    if (seen >= target) {
+      background = value;
+      break;
+    }
+  }
+  const darkThreshold = Math.max(80, Math.min(210, background - 40));
+
+  const rowInk = new Uint16Array(h);
+  const columnInk = new Uint16Array(w);
+  for (let yy = 0; yy < h; yy++) {
+    let ink = 0;
+    for (let xx = 0; xx < w; xx++) {
+      const p = ((y + yy) * imgW + x + xx) * 4;
+      const luminance =
+        0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+      if (luminance <= darkThreshold) {
+        ink++;
+        columnInk[xx]++;
+      }
+    }
+    rowInk[yy] = ink;
+  }
+
+  // DB's polygon expansion deliberately leaves generous horizontal padding.
+  // Character pitch must be based on the actual ink span, otherwise a 23 px
+  // glyph inside a 47 px detector box would be mistaken for half a character.
+  // Ignore isolated antialias/bubble pixels that occur in only a few rows;
+  // otherwise one outlier can make the inferred glyph width almost as wide as
+  // the detector's padded box and cause several characters to be merged.
+  const minColumnInk = Math.max(2, Math.floor(h * 0.03));
+  let inkLeft = 0;
+  while (inkLeft < w && columnInk[inkLeft] < minColumnInk) inkLeft++;
+  let inkRight = w - 1;
+  while (inkRight >= inkLeft && columnInk[inkRight] < minColumnInk) inkRight--;
+  let inkWidth = inkRight - inkLeft + 1;
+  if (inkWidth < Math.max(3, Math.round(w * 0.2))) {
+    inkLeft = 0;
+    inkRight = w - 1;
+    inkWidth = w;
+  }
+  const horizontalPadding = Math.max(1, Math.round(inkWidth * 0.08));
+  const cropLeft = Math.max(0, inkLeft - horizontalPadding);
+  const cropRight = Math.min(w, inkRight + 1 + horizontalPadding);
+
+  // A one-pixel bubble edge can run through the crop. Requiring more than a
+  // small fraction of the width to be dark keeps such an edge from hiding the
+  // whitespace between characters.
+  const maxGapInk = Math.max(1, Math.floor(inkWidth * 0.08));
+  const minGapHeight = Math.max(3, Math.round(inkWidth * 0.12));
+  const gapCenters: number[] = [];
+  let gapStart = -1;
+  for (let yy = 0; yy <= h; yy++) {
+    const isGap = yy < h && rowInk[yy] <= maxGapInk;
+    if (isGap && gapStart < 0) gapStart = yy;
+    if (!isGap && gapStart >= 0) {
+      // Outer padding is not a character boundary.
+      if (yy - gapStart >= minGapHeight && gapStart > 0 && yy < h) {
+        gapCenters.push(Math.round((gapStart + yy) / 2));
+      }
+      gapStart = -1;
+    }
+  }
+  if (gapCenters.length === 0) return null;
+
+  // Select well-spaced gaps. This deliberately ignores large blank bands
+  // inside sparse glyphs such as 三 until roughly one character pitch has
+  // elapsed, so a returned crop contains one or at most two upright glyphs.
+  const minPitch = Math.max(5, Math.round(inkWidth * VERTICAL_MIN_CHARACTER_PITCH));
+  const boundaries = [0];
+  for (const center of gapCenters) {
+    if (center - boundaries[boundaries.length - 1] >= minPitch) {
+      boundaries.push(center);
+    }
+  }
+  if (boundaries.length === 1) return null;
+
+  const segments: BBox[] = [];
+  for (let index = 0; index < boundaries.length; index++) {
+    const top = boundaries[index];
+    const bottom = index + 1 < boundaries.length ? boundaries[index + 1] : h;
+    // A short tail is normally an ellipsis/exclamation dot. Passing it to the
+    // recognizer often produces high-confidence "1"/"20" garbage, so leave it
+    // out rather than exposing it as dialogue text.
+    if (bottom - top < minPitch) continue;
+    segments.push({
+      x: x + cropLeft,
+      y: y + top,
+      w: cropRight - cropLeft,
+      h: bottom - top,
+    });
+  }
+
+  return segments.length >= 2 ? segments : null;
+}
+
+/**
  * Rec-preprocess a *standalone* RGBA crop buffer (whole buffer = the crop), as
  * opposed to {@link recPreprocess} which extracts a bbox from a full image.
  * Used for the orientation-aware region path where we rotate a crop first.
@@ -446,12 +588,36 @@ export async function runOcrPipeline(
   // 2. Recognition per box.
   const lines: OcrLine[] = [];
   for (const bbox of boxes) {
-    const crop = recPreprocess(imgData, imgW, imgH, bbox);
-    if (!crop) continue;
-    const { logits, T, numClasses } = await runRec(crop.tensor, crop.width);
-    const { text, confidence } = ctcDecode(logits, T, numClasses, dictionary);
-    if (text.trim().length === 0 || confidence < minConfidence) continue;
-    lines.push({ text, confidence, bbox });
+    const verticalSegments = splitVerticalTextBox(imgData, imgW, imgH, bbox);
+    const recognitionBoxes = verticalSegments ?? [bbox];
+    let text = "";
+    let confidenceSum = 0;
+    let confidenceCharacters = 0;
+
+    // Vertical segments are already ordered from top to bottom. Horizontal
+    // boxes contain just the original bbox, so both paths share decoding and
+    // confidence filtering here.
+    for (const recognitionBox of recognitionBoxes) {
+      const crop = recPreprocess(imgData, imgW, imgH, recognitionBox);
+      if (!crop) continue;
+      const { logits, T, numClasses } = await runRec(crop.tensor, crop.width);
+      const decoded = ctcDecode(logits, T, numClasses, dictionary);
+      const decodedText = decoded.text.trim();
+      if (decodedText.length === 0 || decoded.confidence < minConfidence) continue;
+      text += decodedText;
+      const characterCount = [...decodedText].length;
+      confidenceSum += decoded.confidence * characterCount;
+      confidenceCharacters += characterCount;
+    }
+
+    if (text.length === 0 || confidenceCharacters === 0) continue;
+    lines.push({
+      text,
+      confidence: confidenceSum / confidenceCharacters,
+      // The UI associates the reconstructed column with the detector's
+      // original box rather than exposing one line per character.
+      bbox,
+    });
   }
 
   return lines;

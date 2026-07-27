@@ -233,10 +233,11 @@ describeIf("REAL PP-OCRv6 det+rec ONNX executes and decodes (headless)", () => {
           : undefined;
         if (metrics) {
           measuredPages++;
-          // Current PP-OCRv6 horizontal recognizer only recovers short vertical
-          // strings. This baseline prevents total regressions while making the
-          // low recall visible until vertical-column splitting is implemented.
-          expect(metrics.characterAccuracy).toBeGreaterThanOrEqual(0.09);
+          // Vertical columns are cut at character gaps before recognition. On
+          // the checked-in manga page this recovers 21/22 expected characters;
+          // keep a percentage floor so model/preprocessing changes cannot
+          // silently return to the old non-empty-only baseline.
+          expect(metrics.characterAccuracy).toBeGreaterThanOrEqual(0.95);
         }
         summary.push({
           file,
@@ -244,6 +245,7 @@ describeIf("REAL PP-OCRv6 det+rec ONNX executes and decodes (headless)", () => {
           lines: lines.map((l) => ({
             text: l.text,
             conf: Math.round(l.confidence * 1000) / 1000,
+            bbox: l.bbox,
           })),
           metrics,
         });

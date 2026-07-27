@@ -8,6 +8,7 @@ import {
   parseDictionary,
   recPreprocess,
   runOcrPipeline,
+  splitVerticalTextBox,
 } from "./ppocr";
 
 describe("parseDictionary", () => {
@@ -220,6 +221,71 @@ describe("recPreprocess", () => {
     expect(result!.tensor[0]).toBeCloseTo(-1, 4); // B
     expect(result!.tensor[2 * plane]).toBeCloseTo(1, 4); // R
     expect(result!.tensor[319]).toBe(0); // right padding
+  });
+});
+
+describe("splitVerticalTextBox", () => {
+  function whiteImage(width: number, height: number) {
+    const data = new Uint8ClampedArray(width * height * 4).fill(255);
+    const fillBlack = (x: number, y: number, w: number, h: number) => {
+      for (let yy = y; yy < y + h; yy++) {
+        for (let xx = x; xx < x + w; xx++) {
+          const p = (yy * width + xx) * 4;
+          data[p] = 0;
+          data[p + 1] = 0;
+          data[p + 2] = 0;
+        }
+      }
+    };
+    return { data, fillBlack };
+  }
+
+  it("cuts an upright text column at character gaps in top-to-bottom order", () => {
+    const { data, fillBlack } = whiteImage(30, 100);
+    fillBlack(5, 2, 20, 20);
+    fillBlack(5, 34, 20, 20);
+    fillBlack(5, 66, 20, 20);
+
+    const segments = splitVerticalTextBox(data, 30, 100, {
+      x: 4,
+      y: 0,
+      w: 22,
+      h: 96,
+    });
+
+    expect(segments).not.toBeNull();
+    expect(segments).toHaveLength(3);
+    expect(segments!.map((segment) => segment.y)).toEqual(
+      [...segments!.map((segment) => segment.y)].sort((a, b) => a - b)
+    );
+    expect(segments!.every((segment) => segment.h >= 20)).toBe(true);
+  });
+
+  it("does not split the internal horizontal strokes of a sparse glyph", () => {
+    const { data, fillBlack } = whiteImage(30, 70);
+    // A synthetic 三-like glyph followed by a solid glyph. Its internal blank
+    // bands are large enough to be gap candidates but shorter than one pitch.
+    fillBlack(5, 2, 20, 3);
+    fillBlack(5, 10, 20, 3);
+    fillBlack(5, 18, 20, 3);
+    fillBlack(5, 36, 20, 22);
+
+    const segments = splitVerticalTextBox(data, 30, 70, {
+      x: 4,
+      y: 0,
+      w: 22,
+      h: 64,
+    });
+
+    expect(segments).not.toBeNull();
+    expect(segments).toHaveLength(2);
+  });
+
+  it("leaves horizontal text on the normal recognition path", () => {
+    const data = new Uint8ClampedArray(80 * 30 * 4).fill(255);
+    expect(
+      splitVerticalTextBox(data, 80, 30, { x: 0, y: 0, w: 80, h: 30 })
+    ).toBeNull();
   });
 });
 

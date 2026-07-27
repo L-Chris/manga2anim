@@ -193,8 +193,11 @@ The full det+rec pipeline is implemented in pure TypeScript (no OpenCV) in
 - **Rec (CTC):** `recPreprocess` crops each detected box, resizes to a fixed
   height of 48 preserving aspect ratio (padded to width 320), and BGR-normalizes
   pixels to `[-1,1]`. `ctcDecode` does greedy argmax → collapse repeats → drop
-  the blank token (index 0) → map `class i → dictionary[i-1]`. Empty results
-  and lines below the calibrated 0.8 mean confidence threshold are discarded.
+  the blank token (index 0) → map `class i → dictionary[i-1]`. Narrow vertical
+  columns are split at horizontal character gaps into upright 1–2 character
+  crops, recognized without rotation, then concatenated top-to-bottom. Empty
+  results and lines below the calibrated 0.8 mean confidence threshold are
+  discarded.
 
 `resolveProvider()` requires the complete YOLO26s + PP-OCRv6 model set (shown in
 the toolbar's "模型" badge after loading). The YOLO post-processing (letterbox
