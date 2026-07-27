@@ -115,6 +115,25 @@ describeIf("REAL YOLO26s-seg ONNX executes and decodes (headless)", () => {
         const ordered = sortByReadingOrder(panels, "rtl");
         expect(ordered.length).toBe(panels.length);
 
+        // Regression fixture for the page that exposed an xyxy-vs-xywh decode
+        // bug. These five anchors correspond to the visible 1 / 2 / 2 panel
+        // rows in data/1.webp and fail dramatically if boxes are decoded as
+        // center-x/center-y/width/height.
+        if (file === "1.webp" && img.width === 1100 && img.height === 1563) {
+          expect(
+            ordered.map((panel) => [
+              Math.round(panel.bbox.x),
+              Math.round(panel.bbox.y),
+            ])
+          ).toEqual([
+            [142, 98],
+            [608, 408],
+            [93, 408],
+            [350, 663],
+            [0, 668],
+          ]);
+        }
+
         summary.push({
           file,
           panels: counts.panel,

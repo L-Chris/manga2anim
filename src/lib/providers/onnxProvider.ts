@@ -196,7 +196,7 @@ class YoloSegmenter implements Segmenter {
  * det layout (Ultralytics **end2end** seg export, verified empirically against
  * the reference model — see scripts/probe-yolo.mjs): [1, N, C] **row-major**,
  * one row per top-k candidate:
- *   cols 0..3           = cx, cy, w, h  (letterboxed input space)
+ *   cols 0..3           = x1, y1, x2, y2 (letterboxed input space)
  *   col  4              = confidence (already sigmoid, [0,1])
  *   col  5              = class id (integer 0..nc-1)
  *   cols 6..6+nm-1      = mask coefficients (nm = 32)
@@ -218,7 +218,7 @@ export function postprocessYolo(
   classNames: readonly DetectionClass[] = buildClassNames(DEFAULT_SEG_CLASS_NAMES),
   confThresh = 0.25
 ): RawDetection[] {
-  // Row-major end2end layout: [1, N, C], C = 4 (xywh) + 1 (conf) + 1 (class) + nm.
+  // Row-major end2end layout: [1, N, C], C = 4 (xyxy) + 1 (conf) + 1 (class) + nm.
   const N = detDims[1];
   const C = detDims[2];
   const nm = Math.max(0, C - 6);
@@ -236,14 +236,16 @@ export function postprocessYolo(
     let classId = Math.round(detData[row + 5]);
     if (classId < 0 || classId >= classNames.length) continue;
 
-    const cx = detData[row + 0];
-    const cy = detData[row + 1];
-    const w = detData[row + 2];
-    const h = detData[row + 3];
-    const x = (cx - w / 2 - padX) / scale;
-    const y = (cy - h / 2 - padY) / scale;
+    const x1 = (detData[row + 0] - padX) / scale;
+    const y1 = (detData[row + 1] - padY) / scale;
+    const x2 = (detData[row + 2] - padX) / scale;
+    const y2 = (detData[row + 3] - padY) / scale;
     boxes.push(
-      clampBBox({ x, y, w: w / scale, h: h / scale }, img.width, img.height)
+      clampBBox(
+        { x: x1, y: y1, w: x2 - x1, h: y2 - y1 },
+        img.width,
+        img.height
+      )
     );
     scores.push(conf);
     classIds.push(classId);

@@ -48,22 +48,22 @@ const dims = det.dims.map(Number);
 const d = det.data;
 // Determine layout: Ultralytics modern export is [1, N, 4+nc+nm] (row-major per
 // detection). The probe prints both interpretations' first-candidate slices so
-// we can eyeball which has sane cx,cy,w,h (within [0,1280]) and a one-hot-ish
-// class score.
+// we can eyeball which has sane x1,y1,x2,y2 (within [0,1280]), confidence, and
+// integer class id values.
 const [, A, B] = dims;
 function rowMajorCandidate(i) { // [1,N,C]: row i = C values
   const off = i * B;
-  return { cx: d[off], cy: d[off + 1], w: d[off + 2], h: d[off + 3], cls: [d[off + 4], d[off + 5], d[off + 6]] };
+  return { x1: d[off], y1: d[off + 1], x2: d[off + 2], y2: d[off + 3], conf: d[off + 4], classId: d[off + 5] };
 }
 function colMajorCandidate(i) { // [1,C,N]: column i
   const N = B;
-  return { cx: d[0 * N + i], cy: d[1 * N + i], w: d[2 * N + i], h: d[3 * N + i], cls: [d[4 * N + i], d[5 * N + i], d[6 * N + i]] };
+  return { x1: d[0 * N + i], y1: d[1 * N + i], x2: d[2 * N + i], y2: d[3 * N + i], conf: d[4 * N + i], classId: d[5 * N + i] };
 }
 console.log(`\nlayout test: A=${A} B=${B}`);
 console.log("  if [1,N,C] (N=A,C=B): first 3 candidates (row-major):");
-for (let i = 0; i < 3; i++) { const c = rowMajorCandidate(i); console.log(`    #${i} cx=${c.cx.toFixed(1)} cy=${c.cy.toFixed(1)} w=${c.w.toFixed(1)} h=${c.h.toFixed(1)} cls=[${c.cls.map(v => v.toFixed(2)).join(",")}]`); }
+for (let i = 0; i < 3; i++) { const c = rowMajorCandidate(i); console.log(`    #${i} x1=${c.x1.toFixed(1)} y1=${c.y1.toFixed(1)} x2=${c.x2.toFixed(1)} y2=${c.y2.toFixed(1)} conf=${c.conf.toFixed(2)} class=${c.classId.toFixed(0)}`); }
 console.log("  if [1,C,N] (C=A,N=B): first 3 candidates (col-major):");
-for (let i = 0; i < 3; i++) { const c = colMajorCandidate(i); console.log(`    #${i} cx=${c.cx.toFixed(1)} cy=${c.cy.toFixed(1)} w=${c.w.toFixed(1)} h=${c.h.toFixed(1)} cls=[${c.cls.map(v => v.toFixed(2)).join(",")}]`); }
+for (let i = 0; i < 3; i++) { const c = colMajorCandidate(i); console.log(`    #${i} x1=${c.x1.toFixed(1)} y1=${c.y1.toFixed(1)} x2=${c.x2.toFixed(1)} y2=${c.y2.toFixed(1)} conf=${c.conf.toFixed(2)} class=${c.classId.toFixed(0)}`); }
 
 // Count candidates with a strong class score under each layout, and how many
 // have bbox coords inside the input canvas — the correct layout yields many
@@ -72,17 +72,16 @@ function stats(getter, N) {
   let inRange = 0, strong = 0;
   for (let i = 0; i < N; i++) {
     const c = getter(i);
-    const maxCls = Math.max(...c.cls);
-    if (maxCls > 0.25) strong++;
-    if (c.cx >= 0 && c.cx <= INPUT && c.cy >= 0 && c.cy <= INPUT && c.w > 0 && c.w <= INPUT && c.h > 0 && c.h <= INPUT) inRange++;
+    if (c.conf > 0.25) strong++;
+    if (c.x1 >= 0 && c.x1 <= INPUT && c.y1 >= 0 && c.y1 <= INPUT && c.x2 > c.x1 && c.x2 <= INPUT && c.y2 > c.y1 && c.y2 <= INPUT) inRange++;
   }
   return { N, strong, inRange };
 }
-console.log("\nstats (strong = max class score>0.25; inRange = bbox within canvas):");
+console.log("\nstats (strong = confidence>0.25; inRange = bbox within canvas):");
 console.log("  [1,N,C]:", JSON.stringify(stats(rowMajorCandidate, A)));
 console.log("  [1,C,N]:", JSON.stringify(stats(colMajorCandidate, B)));
 
-// --- structural dump: decide what the 34 columns after xywh actually are ---
+// --- structural dump: decide what the 34 columns after xyxy actually are ---
 console.log("\n=== candidate #0 full 38 columns (row-major [1,N,C]) ===");
 const row0 = [];
 for (let c = 0; c < B; c++) row0.push(d[0 * B + c]);

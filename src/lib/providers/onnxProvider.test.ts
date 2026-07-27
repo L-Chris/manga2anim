@@ -19,7 +19,7 @@ import {
 import type { DecodedImage } from "./types";
 
 const NM = 32; // mask coefficients (Ultralytics default)
-// Verified end2end row layout: [xywh(4)] + [conf(1)] + [classId(1)] + [mask(32)].
+// Verified end2end row layout: [xyxy(4)] + [conf(1)] + [classId(1)] + [mask(32)].
 const C = 4 + 1 + 1 + NM; // = 38, matches the real exported model
 
 /**
@@ -30,10 +30,10 @@ const C = 4 + 1 + 1 + NM; // = 38, matches the real exported model
  */
 function makeDet(
   cands: Array<{
-    cx: number;
-    cy: number;
-    w: number;
-    h: number;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
     scores: number[]; // length NUM_CLASSES
     coeffs?: number[]; // length NM
   }>,
@@ -49,10 +49,10 @@ function makeDet(
     for (let k = 0; k < c.scores.length; k++) {
       if (c.scores[k] > conf) { conf = c.scores[k]; classId = k; }
     }
-    data[row + 0] = c.cx;
-    data[row + 1] = c.cy;
-    data[row + 2] = c.w;
-    data[row + 3] = c.h;
+    data[row + 0] = c.x1;
+    data[row + 1] = c.y1;
+    data[row + 2] = c.x2;
+    data[row + 3] = c.y2;
     data[row + 4] = conf;
     data[row + 5] = classId;
     const coeffs = c.coeffs ?? new Array(NM).fill(0);
@@ -166,18 +166,40 @@ describe("letterbox", () => {
 describe("postprocessYolo", () => {
   const classNames = buildClassNames(["frame", "text", "balloon"]);
 
+  it("decodes end-to-end xyxy coordinates and reverses letterbox padding", () => {
+    const { data, dims } = makeDet(
+      [{ x1: 150, y1: 50, x2: 350, y2: 250, scores: [0.9, 0.1, 0.1] }],
+      1280
+    );
+
+    const dets = postprocessYolo(
+      data,
+      dims,
+      undefined,
+      undefined,
+      0.5,
+      100,
+      0,
+      1280,
+      { width: 1000, height: 1000 },
+      classNames
+    );
+
+    expect(dets[0].bbox).toEqual({ x: 100, y: 100, w: 400, h: 400 });
+  });
+
   it("filters low confidence, applies per-class NMS, and maps classes", () => {
     const { data, dims } = makeDet(
       [
         // A: strong panel
-        { cx: 100, cy: 100, w: 40, h: 40, scores: [0.9, 0.1, 0.1] },
+        { x1: 80, y1: 80, x2: 120, y2: 120, scores: [0.9, 0.1, 0.1] },
         // B: panel almost identical to A but weaker → suppressed by NMS
-        // (cx=105 → box (85,85,40,40), IoU with A's (80,80,40,40) ≈ 0.62 > 0.6)
-        { cx: 105, cy: 105, w: 40, h: 40, scores: [0.5, 0.1, 0.1] },
+        // (box (85,85,40,40), IoU with A's (80,80,40,40) ≈ 0.62 > 0.6)
+        { x1: 85, y1: 85, x2: 125, y2: 125, scores: [0.5, 0.1, 0.1] },
         // C: text region, separate location → kept
-        { cx: 500, cy: 500, w: 20, h: 20, scores: [0.1, 0.8, 0.1] },
+        { x1: 490, y1: 490, x2: 510, y2: 510, scores: [0.1, 0.8, 0.1] },
         // D: below threshold → filtered
-        { cx: 700, cy: 700, w: 20, h: 20, scores: [0.05, 0.1, 0.05] },
+        { x1: 690, y1: 690, x2: 710, y2: 710, scores: [0.05, 0.1, 0.05] },
       ],
       1280
     );
@@ -202,7 +224,7 @@ describe("postprocessYolo", () => {
     expect(byClass.text).toBeDefined();
     expect(byClass.bubble).toBeUndefined();
 
-    // Letterbox inverse with scale=1,pad=0: bbox = (cx-w/2, cy-h/2, w, h).
+    // Letterbox inverse with scale=1,pad=0 preserves the xyxy box.
     expect(byClass.panel.bbox).toEqual({ x: 80, y: 80, w: 40, h: 40 });
     expect(byClass.panel.confidence).toBeCloseTo(0.9, 5);
     expect(byClass.panel.classId).toBe(0);
@@ -213,7 +235,7 @@ describe("postprocessYolo", () => {
   it("returns undefined polygon when mask coefficients produce no active pixels", () => {
     // All-zero coefficients → sigmoid(0)=0.5 → not > 0.5 → no points.
     const { data, dims } = makeDet(
-      [{ cx: 64, cy: 64, w: 20, h: 20, scores: [0.9, 0, 0] }],
+      [{ x1: 54, y1: 54, x2: 74, y2: 74, scores: [0.9, 0, 0] }],
       1280
     );
     const proto = new Float32Array(1 * NM * 4 * 4); // all zero
@@ -235,8 +257,8 @@ describe("postprocessYolo", () => {
 
   it("clamps boxes to the image bounds", () => {
     const { data, dims } = makeDet(
-      // Box centered near the corner, half outside the image.
-      [{ cx: 5, cy: 5, w: 40, h: 40, scores: [0.9, 0, 0] }],
+      // Box crosses the top-left corner and must be clipped to the image.
+      [{ x1: -15, y1: -15, x2: 25, y2: 25, scores: [0.9, 0, 0] }],
       1280
     );
     const dets = postprocessYolo(
