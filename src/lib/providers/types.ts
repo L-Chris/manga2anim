@@ -1,4 +1,4 @@
-import type { BBox, OcrLine, RawDetection } from "../../types";
+import type { OcrLine, RawDetection } from "../../types";
 
 /**
  * Decoded image handed to providers. Pixel data is RGBA (Uint8ClampedArray),
