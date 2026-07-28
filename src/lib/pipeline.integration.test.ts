@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isOtherText } from "../types";
 import type { OcrLine, RawDetection } from "../types";
 import { parsePage } from "./pipeline";
 import type { DecodedImage, InferenceProvider } from "./providers/types";
@@ -121,6 +122,156 @@ describe("pipeline integration", () => {
 
     expect(rtl.panels[0].bbox.x).toBe(210);
     expect(ltr.panels[0].bbox.x).toBe(10);
+  });
+
+  it("keeps assigned unknown text in its panel instead of duplicating it as other text", async () => {
+    const result = await parsePage(image, createTestProvider(), {
+      pageId: "exclusive-groups",
+      name: "page.png",
+      readingDirection: "rtl",
+    });
+    const assignedUnknown = result.textRegions.find(
+      (region) => region.text === "left caption"
+    );
+    const standalone = result.textRegions.find(
+      (region) => region.text === "standalone"
+    );
+
+    expect(assignedUnknown?.kind).toBe("unknown");
+    expect(assignedUnknown?.panelId).not.toBeNull();
+    expect(isOtherText(assignedUnknown!)).toBe(false);
+    expect(standalone?.panelId).toBeNull();
+    expect(isOtherText(standalone!)).toBe(true);
+  });
+
+  it("assigns overlapping bubble and text OCR once with bubble priority", async () => {
+    const detections: RawDetection[] = [
+      {
+        classId: 0,
+        className: "panel",
+        confidence: 0.95,
+        bbox: { x: 0, y: 0, w: 200, h: 200 },
+      },
+      {
+        classId: 2,
+        className: "bubble",
+        confidence: 0.9,
+        bbox: { x: 20, y: 20, w: 140, h: 140 },
+      },
+      {
+        classId: 1,
+        className: "text",
+        confidence: 0.92,
+        bbox: { x: 90, y: 40, w: 30, h: 80 },
+      },
+      {
+        classId: 1,
+        className: "text",
+        confidence: 0.91,
+        bbox: { x: 50, y: 40, w: 30, h: 80 },
+      },
+    ];
+    const lines: OcrLine[] = [
+      {
+        text: "second column",
+        confidence: 0.97,
+        bbox: { x: 55, y: 45, w: 20, h: 70 },
+      },
+      {
+        text: "first column",
+        confidence: 0.98,
+        bbox: { x: 95, y: 45, w: 20, h: 70 },
+      },
+    ];
+    const provider: InferenceProvider = {
+      id: "overlap",
+      label: "Overlap provider",
+      segmenter: {
+        name: "Overlap segmenter",
+        async segment() {
+          return detections;
+        },
+      },
+      ocr: {
+        name: "Overlap OCR",
+        async recognize() {
+          return lines;
+        },
+      },
+    };
+
+    const result = await parsePage(image, provider, {
+      pageId: "overlap",
+      name: "page.png",
+      readingDirection: "rtl",
+    });
+
+    expect(result.textRegions).toHaveLength(1);
+    expect(result.textRegions[0]).toMatchObject({
+      text: "first column second column",
+      kind: "dialogue",
+      fromBubble: true,
+    });
+    expect(result.panels[0].textIds).toEqual([result.textRegions[0].id]);
+    expect(result.textRegions.filter(isOtherText)).toEqual([]);
+  });
+
+  it("deduplicates overlapping raw text detections without a bubble", async () => {
+    const detections: RawDetection[] = [
+      {
+        classId: 0,
+        className: "panel",
+        confidence: 0.95,
+        bbox: { x: 0, y: 0, w: 200, h: 200 },
+      },
+      {
+        classId: 1,
+        className: "text",
+        confidence: 0.85,
+        bbox: { x: 20, y: 20, w: 140, h: 140 },
+      },
+      {
+        classId: 1,
+        className: "text",
+        confidence: 0.92,
+        bbox: { x: 60, y: 40, w: 40, h: 80 },
+      },
+    ];
+    const line: OcrLine = {
+      text: "recognized once",
+      confidence: 0.99,
+      bbox: { x: 65, y: 45, w: 30, h: 70 },
+    };
+    const provider: InferenceProvider = {
+      id: "text-overlap",
+      label: "Text overlap provider",
+      segmenter: {
+        name: "Text overlap segmenter",
+        async segment() {
+          return detections;
+        },
+      },
+      ocr: {
+        name: "Text overlap OCR",
+        async recognize() {
+          return [line];
+        },
+      },
+    };
+
+    const result = await parsePage(image, provider, {
+      pageId: "text-overlap",
+      name: "page.png",
+      readingDirection: "rtl",
+    });
+
+    expect(result.textRegions).toHaveLength(1);
+    expect(result.textRegions[0]).toMatchObject({
+      text: "recognized once",
+      fromBubble: false,
+      panelId: result.panels[0].id,
+    });
+    expect(result.panels[0].textIds).toEqual([result.textRegions[0].id]);
   });
 
   it("keeps columns in one bubble and joins them in reading order", async () => {

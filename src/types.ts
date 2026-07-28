@@ -143,7 +143,7 @@ export interface ExportPage {
   readingDirection: ReadingDirection;
   panels: Panel[];
   textRegions: TextRegion[];
-  /** Convenience: text regions not assigned to any panel / non-dialogue. */
+  /** Convenience: text regions not assigned to any panel. */
   otherTexts: TextRegion[];
 }
 
@@ -152,7 +152,7 @@ export function isDialogueKind(kind: TextKind): boolean {
   return kind === "dialogue" || kind === "thought";
 }
 
-/** True if a text region should appear in the "other text" section. */
+/** True if a text region is not assigned to a panel. */
 export function isOtherText(region: TextRegion): boolean {
-  return !isDialogueKind(region.kind) || region.panelId === null;
+  return region.panelId === null;
 }

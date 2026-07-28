@@ -8,7 +8,7 @@ import type {
 } from "../types";
 import { classifyText } from "./classify";
 import { panelColor } from "./colors";
-import { containment, unionBBox } from "./geometry";
+import { bboxArea, containment, unionBBox } from "./geometry";
 import type { DecodedImage, InferenceProvider, ProgressFn } from "./providers/types";
 import { sortByReadingOrder } from "./readingOrder";
 
@@ -116,9 +116,12 @@ export async function parsePage(
 /**
  * Merge bubble detections, text detections, and OCR lines into TextRegions.
  *
- * Strategy: each bubble/text detection becomes a region. The region's text is
- * the concatenation of OCR lines whose centers fall inside it; regions without
- * recognized text remain empty for manual correction.
+ * Strategy: every OCR line is assigned to exactly one detection, with bubbles
+ * taking priority over raw text boxes. This prevents the same recognized line
+ * from becoming both a dialogue region and an "unknown" text region when YOLO
+ * emits overlapping bubble + text detections. Detections without recognized
+ * text remain empty for manual correction unless another detection already
+ * owns the OCR content they cover.
  */
 function assembleTextRegions(
   bubbles: RawDetection[],
@@ -130,22 +133,86 @@ function assembleTextRegions(
 ): TextRegion[] {
   const regions: TextRegion[] = [];
 
-  const makeRegion = (det: RawDetection, fromBubble: boolean): TextRegion => {
+  type RegionBucket = {
+    det: RawDetection;
+    fromBubble: boolean;
+    lines: OcrLine[];
+  };
+
+  const bubbleBuckets: RegionBucket[] = bubbles.map((det) => ({
+    det,
+    fromBubble: true,
+    lines: [],
+  }));
+  const textBuckets: RegionBucket[] = texts.map((det) => ({
+    det,
+    fromBubble: false,
+    lines: [],
+  }));
+
+  const lineMatchesDetection = (line: OcrLine, det: RawDetection): boolean => {
+    const centerX = line.bbox.x + line.bbox.w / 2;
+    const centerY = line.bbox.y + line.bbox.h / 2;
+    return (
+      pointInBBox(centerX, centerY, det.bbox) ||
+      containment(line.bbox, det.bbox) >= 0.5
+    );
+  };
+
+  const findBestBucket = (
+    line: OcrLine,
+    buckets: RegionBucket[]
+  ): RegionBucket | null => {
+    let best: RegionBucket | null = null;
+    let bestContainment = -1;
+    let bestArea = Infinity;
+    let bestConfidence = -1;
+    for (const bucket of buckets) {
+      if (!lineMatchesDetection(line, bucket.det)) continue;
+      const covered = containment(line.bbox, bucket.det.bbox);
+      const area = bboxArea(bucket.det.bbox);
+      if (
+        covered > bestContainment ||
+        (covered === bestContainment && area < bestArea) ||
+        (covered === bestContainment &&
+          area === bestArea &&
+          bucket.det.confidence > bestConfidence)
+      ) {
+        best = bucket;
+        bestContainment = covered;
+        bestArea = area;
+        bestConfidence = bucket.det.confidence;
+      }
+    }
+    return best;
+  };
+
+  const assignedLines = new Set<OcrLine>();
+  for (const line of ocrLines) {
+    // A bubble is the semantic container for dialogue. Only fall back to a raw
+    // text detection when no bubble covers the OCR line.
+    const owner =
+      findBestBucket(line, bubbleBuckets) ??
+      findBestBucket(line, textBuckets);
+    if (!owner) continue;
+    owner.lines.push(line);
+    assignedLines.add(line);
+  }
+
+  const makeRegion = (bucket: RegionBucket): TextRegion => {
     const contained = sortByReadingOrder(
-      ocrLines.filter((l) =>
-        pointInBBox(l.bbox.x + l.bbox.w / 2, l.bbox.y + l.bbox.h / 2, det.bbox)
-      ),
+      bucket.lines,
       readingDirection
     );
     const text = contained.map((l) => l.text).join(" ");
     const confidence = contained.length > 0
       ? contained.reduce((s, l) => s + l.confidence, 0) / contained.length
-      : det.confidence;
+      : bucket.det.confidence;
 
     const kind = classifyText({
       text,
-      bbox: det.bbox,
-      fromBubble,
+      bbox: bucket.det.bbox,
+      fromBubble: bucket.fromBubble,
       pageWidth,
       pageHeight,
     });
@@ -155,23 +222,42 @@ function assembleTextRegions(
       kind,
       text,
       confidence,
-      bbox: det.bbox,
-      polygon: det.polygon,
-      fromBubble,
+      bbox: bucket.det.bbox,
+      polygon: bucket.det.polygon,
+      fromBubble: bucket.fromBubble,
       panelId: null,
     };
   };
 
-  for (const b of bubbles) regions.push(makeRegion(b, true));
-  for (const t of texts) regions.push(makeRegion(t, false));
+  const hasCoveredLine = (bucket: RegionBucket): boolean =>
+    ocrLines.some((line) => lineMatchesDetection(line, bucket.det));
+
+  for (const bucket of bubbleBuckets) {
+    // Suppress duplicate bubble detections whose OCR was assigned to a better
+    // (usually tighter) bubble, while preserving genuinely empty bubbles.
+    if (bucket.lines.length === 0 && hasCoveredLine(bucket)) continue;
+    regions.push(makeRegion(bucket));
+  }
+  for (const bucket of textBuckets) {
+    const shadowedByBubble = bubbles.some(
+      (bubble) => containment(bucket.det.bbox, bubble.bbox) >= 0.5
+    );
+    // Text boxes inside bubbles are structural duplicates. Likewise, if a
+    // different text box already owns every OCR line covered by this box, an
+    // empty duplicate card provides no useful manual-correction target.
+    if (
+      bucket.lines.length === 0 &&
+      (shadowedByBubble || hasCoveredLine(bucket))
+    ) {
+      continue;
+    }
+    regions.push(makeRegion(bucket));
+  }
 
   // Any OCR lines not captured by a detection become standalone "other text".
   if (ocrLines.length > 0) {
     for (const line of ocrLines) {
-      const captured = regions.some((r) =>
-        pointInBBox(line.bbox.x + line.bbox.w / 2, line.bbox.y + line.bbox.h / 2, r.bbox)
-      );
-      if (captured) continue;
+      if (assignedLines.has(line)) continue;
       const kind = classifyText({
         text: line.text,
         bbox: line.bbox,

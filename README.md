@@ -46,7 +46,7 @@ src/
   components/
     Toolbar.tsx                import / direction / export controls
     ImageViewer.tsx            image + SVG panel overlay (borders, badges, click)
-    DialoguePanel.tsx          right-side dialogue flow + editing + other text
+    DialoguePanel.tsx          right-side panel text flow + editing + unassigned text
     PageStrip.tsx              multi-page thumbnail navigation
     EmptyState.tsx             landing / import prompt
 src-tauri/                     Rust backend (window, dialog + fs plugins, models dir)
@@ -215,4 +215,4 @@ synthetic tensors.
 `manga-panel-parser/v1` — see `ExportDocument` in `src/types.ts`. Each page
 includes `panels` (with `order`, `color`, `bbox`, linked `textIds`) and
 `textRegions` (with `kind`, `text`, `bbox`, `panelId`), plus a convenience
-`otherTexts` array.
+`otherTexts` array containing only regions that are not assigned to a panel.

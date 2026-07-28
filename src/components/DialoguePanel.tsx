@@ -1,5 +1,5 @@
 import { useStore } from "../store";
-import { isDialogueKind, isOtherText } from "../types";
+import { isOtherText } from "../types";
 import type { PageResult, Panel, TextKind, TextRegion } from "../types";
 
 const KIND_LABELS: Record<TextKind, string> = {
@@ -27,7 +27,7 @@ export function DialoguePanel({ page }: { page: PageResult }) {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-ink-700 px-4 py-3">
-        <h2 className="text-sm font-semibold text-slate-100">对话流</h2>
+        <h2 className="text-sm font-semibold text-slate-100">分镜文本流</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
           按阅读顺序 · {panels.length} 个分镜
         </p>
@@ -50,7 +50,7 @@ export function DialoguePanel({ page }: { page: PageResult }) {
         <div className="mt-5">
           <div className="mb-2 flex items-center gap-2 px-1">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              其他文本区域
+              未归属文本
             </span>
             <span className="rounded-full bg-ink-800 px-1.5 text-[10px] text-slate-500">
               {otherTexts.length}
@@ -79,9 +79,9 @@ function PanelCard({ page, panel }: { page: PageResult; panel: Panel }) {
   const deletePanel = useStore((s) => s.deletePanel);
 
   const selected = panel.id === selectedPanelId;
-  const dialogueRegions = panel.textIds
+  const panelRegions = panel.textIds
     .map((id) => page.textRegions.find((t) => t.id === id))
-    .filter((t): t is TextRegion => Boolean(t) && isDialogueKind(t!.kind));
+    .filter((t): t is TextRegion => Boolean(t));
 
   return (
     <div
@@ -118,11 +118,11 @@ function PanelCard({ page, panel }: { page: PageResult; panel: Panel }) {
         </div>
       </div>
 
-      {dialogueRegions.length === 0 ? (
-        <p className="px-1 text-[11px] italic text-slate-600">（无对话）</p>
+      {panelRegions.length === 0 ? (
+        <p className="px-1 text-[11px] italic text-slate-600">（无文本）</p>
       ) : (
         <div className="space-y-2">
-          {dialogueRegions.map((region) => (
+          {panelRegions.map((region) => (
             <TextRow key={region.id} page={page} region={region} />
           ))}
         </div>
@@ -197,7 +197,7 @@ function TextRow({
           }
           className="rounded border border-ink-600 bg-ink-800 px-1 py-0.5 text-[10px] text-slate-300 outline-none focus:border-accent"
         >
-          <option value="">（其他文本）</option>
+          <option value="">（未归属）</option>
           {page.panels.map((p) => (
             <option key={p.id} value={p.id}>
               分镜 {p.order}

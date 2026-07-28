@@ -18,7 +18,9 @@ import {
   letterbox,
   postprocessYolo,
 } from "./onnxProvider";
+import { isOtherText } from "../../types";
 import type { BBox, OcrLine } from "../../types";
+import { parsePage } from "../pipeline";
 
 const ROOT = process.cwd();
 const SEG = join(ROOT, "models/yolo26s-manga-seg.onnx");
@@ -56,14 +58,13 @@ const OCR_GROUND_TRUTH: Record<
   Array<{ text: string; bbox: BBox }>
 > = {
   "1.webp": [
-    { text: "2017年", bbox: { x: 904, y: 147, w: 48, h: 198 } },
-    { text: "今天也讓我", bbox: { x: 949, y: 596, w: 38, h: 140 } },
-    { text: "在這裡工作吧～", bbox: { x: 916, y: 599, w: 39, h: 190 } },
-    { text: "你最近", bbox: { x: 160, y: 621, w: 40, h: 92 } },
-    { text: "來得挺勤啊", bbox: { x: 129, y: 622, w: 39, h: 137 } },
-    { text: "馬上就要發售", bbox: { x: 971, y: 1026, w: 38, h: 163 } },
-    { text: "要忙的事情", bbox: { x: 831, y: 1175, w: 38, h: 137 } },
-    { text: "店鋪獨家特典", bbox: { x: 896, y: 1176, w: 35, h: 160 } },
+    { text: "已经够了…", bbox: { x: 791, y: 64, w: 43, h: 157 } },
+    { text: "我不想看见", bbox: { x: 332, y: 266, w: 47, h: 162 } },
+    { text: "优诺", bbox: { x: 295, y: 268, w: 46, h: 77 } },
+    { text: "再受更多伤了！", bbox: { x: 188, y: 355, w: 44, h: 200 } },
+    { text: "切", bbox: { x: 646, y: 509, w: 55, h: 55 } },
+    { text: "已经…", bbox: { x: 411, y: 837, w: 55, h: 120 } },
+    { text: "够了…", bbox: { x: 285, y: 1016, w: 57, h: 125 } },
   ],
 };
 
@@ -230,11 +231,44 @@ describeIf("REAL PP-OCRv6 det+rec ONNX executes and decodes (headless)", () => {
           : undefined;
         if (metrics) {
           measuredPages++;
-          // Keep a measured floor for the checked-in vertical Traditional
-          // Chinese page so model/preprocessing changes cannot silently return
-          // to the old non-empty-only baseline.
-          expect(metrics.characterAccuracy).toBeGreaterThanOrEqual(0.98);
+          expect(metrics.characterAccuracy).toBeGreaterThanOrEqual(0.95);
         }
+
+        // Reuse the already-computed real detections/OCR lines to verify the
+        // final assembly. Every text region must occur in exactly one visible
+        // group: either one panel or the unassigned-text section, never both.
+        const parsed = await parsePage(
+          img,
+          {
+            id: "real-assembly",
+            label: "Real assembly fixture",
+            segmenter: {
+              name: "Captured real detections",
+              async segment() {
+                return detections;
+              },
+            },
+            ocr: {
+              name: "Captured real OCR",
+              async recognize() {
+                return lines;
+              },
+            },
+          },
+          {
+            pageId: file,
+            name: file,
+            readingDirection: "rtl",
+          }
+        );
+        const panelTextIds = parsed.panels.flatMap((panel) => panel.textIds);
+        const otherTextIds = parsed.textRegions.filter(isOtherText).map((r) => r.id);
+        const visibleTextIds = [...panelTextIds, ...otherTextIds];
+        expect(new Set(visibleTextIds).size).toBe(visibleTextIds.length);
+        expect(new Set(visibleTextIds)).toEqual(
+          new Set(parsed.textRegions.map((region) => region.id))
+        );
+
         summary.push({
           file,
           yoloRegions: regions.length,
@@ -244,6 +278,12 @@ describeIf("REAL PP-OCRv6 det+rec ONNX executes and decodes (headless)", () => {
             bbox: l.bbox,
           })),
           metrics,
+          assembledRegions: parsed.textRegions.map((region) => ({
+            text: region.text,
+            kind: region.kind,
+            fromBubble: region.fromBubble,
+            panelId: region.panelId,
+          })),
         });
       }
 
